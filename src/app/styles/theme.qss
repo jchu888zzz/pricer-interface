@@ -1,0 +1,211 @@
+/* General */
+QMainWindow,
+QDialog#ResultDialog { background: #0d2b52; color: #f6f2e6; }
+
+/* Sidebar */
+QFrame#sidebar {
+    background: #4f8fe6;
+}
+
+/* Sidebar logo */
+QLabel#logo {
+    color: #ffffffc5;
+    font: 16pt "Segoe UI";
+    padding: 10px 8px;
+}
+
+/* Sidebar buttons (icon + text, left aligned) */
+QPushButton#btnHome,
+QPushButton#btnSettings,
+QPushButton#btnEquity,
+QPushButton#btnRate,
+QPushButton#btnCMT,
+QPushButton#btnSpreadCMT,
+QPushButton#btnToggle {
+    color: #ffffffff;
+    background: transparent;
+    border: none;
+    padding: 10px 14px;
+    text-align: left;
+    border-radius: 8px;
+    font: 11pt "Segoe UI";
+}
+
+/* Sidebar button icon spacing (when text present) */
+QPushButton#btnHome::icon,
+QPushButton#btnSettings::icon,
+QPushButton#btnToggle::icon {
+    /* Qt doesn't support ::icon sizing in all styles, keep this as a hint */
+}
+
+/* Sidebar hover / checked states */
+QPushButton#btnHome:hover,
+QPushButton#btnSettings:hover,
+QPushButton#btnEquity:hover,
+QPushButton#btnRate:hover,
+QPushButton#btnSpreadCMT:hover,
+QPushButton#btnCMT:hover {
+    background: rgba(255,255,255,0.04);
+}
+QPushButton#btnHome:checked,
+QPushButton#btnSettings:checked,
+QPushButton#btnEquity:checked,
+QPushButton#btnRate:checked,
+QPushButton#btnSpreadCMT:checked,
+QPushButton#btnCMT:checked {
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 rgba(102,217,239,0.12), stop:1 rgba(102,217,239,0.06));
+    color: #ffcfc4;
+}
+
+
+/* Page-specific buttons (primary action on pages) */
+QPushButton#homeButton,
+QPushButton#pagePrimary,
+QPushButton#submit_btn,
+QPushButton#copyTable {
+    min-width: 50px;
+    min-height: 30px;
+    max-width: 110px;
+    border-radius: 10px;
+    font: 10pt "Segoe UI";
+    color: #ffffffff;
+    background: #4f8fe6;
+    border: 1px solid rgba(255,255,255,0.06);
+    padding: 8px 14px;
+}
+
+/* Hover + pressed for page buttons */
+QPushButton#homeButton:hover,
+QPushButton#pagePrimary:hover,
+QPushButton#submit_btn:hover,
+QPushButton#copyTable:hover {
+    background: #c0b490;
+}
+QPushButton#homeButton:pressed,
+QPushButton#pagePrimary:pressed,
+QPushButton#submit_btn:pressed,
+QPushButton#copyTable:pressed {
+    background: #c0b490;
+}
+
+QPushButton#homeButton:disabled {
+    background: #88888888;
+}
+
+
+/* content labels */
+QLabel { color: #dbefff; }
+
+
+/* Placeholder text */
+QLineEdit#nameField::placeholder,
+QLineEdit#emailField::placeholder {
+    color: rgba(230,238,246,0.45);
+}
+
+/* MessageBox */
+QMessageBox {
+    background-color: #4f8fe6;
+}
+
+
+/* Tab widget and bar */
+QTabWidget#mainTabs {
+    background: transparent;
+    border: none;
+}
+
+QTabBar::tab {
+    background: transparent;
+    color: #cfefff;
+    padding: 8px 14px;
+    margin: 2px;
+    border-radius: 8px;
+    font: 10pt "Segoe UI";
+}
+
+QTabBar::tab:selected {
+    background: rgba(102,217,239,0.10);
+    color: #eaffff;
+}
+
+QTabBar::tab:hover {
+    background: rgba(255,255,255,0.03);
+}
+
+/* Make tab pages use the same padding/background as other content pages */
+QTabWidget::pane { background: transparent; border: none; }
+QWidget#tabsPage,
+QWidget#formPage,
+QWidget#tab_autocallEquity,
+QWidget#tab_details,
+QWidget#tab_financial,
+QWidget#tab_autocallrate,
+QStackedWidget
+
+
+/* Ensure the container that holds the form uses full width/height */
+QWidget#tabsPage,
+QTabWidget#mainTabs QWidget {
+    background: transparent;
+}
+
+/* Form fields: inputs, dates and numeric controls */
+QLineEdit#nameField,
+QComboBox#currency,
+QDateEdit#issue_date,
+QSpinBox#maturity,
+QSpinBox#fixing_offset,
+QComboBox#frequency,
+QComboBox#call_frequency,
+QDateEdit#first_call_date,
+QComboBox#fixing_type,
+QSpinBox#NC,
+QDoubleSpinBox#autocall_level,
+QDoubleSpinBox#coupon_level,
+QDoubleSpinBox#coupon,
+QComboBox#undl,
+QComboBox#structure_type,
+QDoubleSpinBox#buffer,
+QDoubleSpinBox#UF,
+QDoubleSpinBox#lowerbound_level,
+QDoubleSpinBox#upperbound_level,
+QDoubleSpinBox#Target,
+QSpinBox#nb_guaranteedcoupon,
+QDateEdit#initial_strike_date
+{
+    background: #4f8fe6;
+    border: 1px solid rgba(221, 217, 217, 0.71);
+    color: #e6eef6;
+    padding: 8px 10px;
+    border-radius: 8px;
+    min-width: 50px;
+    min-height: 10px;
+    max-width: 100px;
+    selection-background-color: #405458ff;
+    selection-color: #062032;
+    font: 8pt "Segoe UI";
+}
+
+/* --- Modern header for result tables --- */
+QTableWidget#resultTable QHeaderView::section,
+QTableWidget#resultTable
+ {
+    background:  #0d2b52;
+    color: #ffffffff;
+    font: 8pt "Segoe UI";
+    border-bottom: 2px solid #66d9ef;
+    border-top: none;
+    border-left: none;
+    border-right: none;
+    padding: 6px 8px;
+    letter-spacing: 0.5px;
+}
+
+QLabel#label_uf,
+QLabel#label_coupon,
+QLabel#label_duration,
+QLabel#label_spread
+ {
+    font: bold 10pt "Segoe UI"
+}
