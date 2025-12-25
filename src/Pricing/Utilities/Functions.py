@@ -14,7 +14,7 @@ def find_idx(grid:list,value:list) -> int:
 def first_occ(item:list,value:list) -> int:
     
     if value in item:
-        idx=np.argwhere(item==value)[0]
+        idx=np.argwhere(item==value)[0][0]
         return int(idx)
     else:
         return len(item)-1
