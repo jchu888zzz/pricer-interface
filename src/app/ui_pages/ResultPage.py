@@ -109,11 +109,8 @@ class Ui_ResultPage(QWidget):
 
 class Ui_ResultPageRate(QWidget):
 
-    def __init__(self,input:dict=None,result:dict=None,
-                 title1:str="Input",title2:str="Results"):
+    def __init__(self,title1:str="Input",title2:str="Results"):
         super().__init__()
-        self.input=input or {}
-        self.result=self._format_data(result) or {}
         self.title1=title1
         self.title2=title2
         self.setup_ui()
@@ -175,6 +172,10 @@ class Ui_ResultPageRate(QWidget):
         layout.addWidget(right_widget,1)
 
         main_layout.addLayout(layout)
+
+    def retrieve_values(self,input:dict,result:dict):
+        self.input=input
+        self.result=result
 
     def display_left(self,data:dict):
 
