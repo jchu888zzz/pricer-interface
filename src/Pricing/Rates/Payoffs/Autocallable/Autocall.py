@@ -173,7 +173,7 @@ class Autocall(Base.Payoff):
         """ undl shape (nb time steps, nb simu)"""
         autocall_cdt=(undl.T <=self.autocall_lvl)
         autocall_cdt[:,:self.call_idxs[0]]=0 # set period before call to 0
-        return [Functions.first_occ(np.array(x),True) for x in autocall_cdt]
+        return [Functions.first_occ(x,True) for x in autocall_cdt]
         
     def compute_cashflows(self,dic_arg:dict) -> np.ndarray:
         """ dic_arg must contain necessary arguments for pricing cashflows """
