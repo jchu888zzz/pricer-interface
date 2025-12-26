@@ -58,15 +58,16 @@ class Ui_SolvingForm(QFormLayout):
     
     def _retrieve_input(self) ->dict[str:str]:
         
-        #data={"structure_type":self.structure_type.currentText()}
-
+        data={"solving_choice":self.choice.currentText()}
         if self.choice.currentText()=="Solve coupon":
-            return {"UF":str(self.UF.value())+'%',
+            data.update({"UF":str(self.UF.value())+'%',
                     "yearly_buffer":str(self.buffer.value())+'%',
-                    "structure_type":"Swap"}
+                    "structure_type":"Swap"})
+            return data
         else:
-            return {"coupon":str(self.coupon.value())+'%',
-                    "structure_type":"Bond"}
+            data.update({"coupon":str(self.coupon.value())+'%',
+                        "structure_type":"Bond"})
+            return data
 
 
 class Ui_PricingForm(QFormLayout):
@@ -90,8 +91,8 @@ class Ui_PricingForm(QFormLayout):
         self.addRow(btn_layout)
     
     def _retrieve_input(self) ->dict[str:str]:
-        data={"structure_type":self.structure_type.currentText()}
-        return data
+        return {"solving_choice":"Price",
+              "structure_type":"Bond"}
 
 class Ui_SolvingFormEquity(QFormLayout):
     def __init__(self):

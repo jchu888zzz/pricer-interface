@@ -57,5 +57,6 @@ class Ui_SpreadCMTPage(QWidget):
     def _on_submitted(self, input_data: dict, source_tab: str):
         # add source metadata and re-emit
         data = {'param':input_data,
-                "_source_tab":source_tab}
+                "_source_tab":source_tab,
+                "_source_page":"SpreadCMT"}
         self.submitted.emit(data)
