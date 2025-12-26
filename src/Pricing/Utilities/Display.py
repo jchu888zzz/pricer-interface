@@ -38,24 +38,17 @@ def format_ql_date(date:ql.Date,format:str) -> str:
 
 def display_pricing_results(res:dict):
 
-    print('Price',format_to_percent(res['Price']))
+    print('Price',format_to_percent(res['price']))
     print('Duration',res["duration"])
     if 'coupon' in res.keys():
         print('Coupon',format_to_percent(res["coupon"]))
     print('funding_spread',format_to_bps(res["funding_spread"]))
-    if not "Funding" in res.keys():
-        keys_to_include=['Payment Dates','Early Redemption Proba','Cash Flows','Zero Coupon']
-        if 'Model Forward' in res.keys():
-            keys_to_include.insert(1,'Model Forward')
-        print(pd.DataFrame({key:res[key] for key in keys_to_include}))
+    if not "funding_table" in res.keys():
+        print(pd.DataFrame(res["table"]))
         return
     else:
         print('Structure')
-        structure_keys=['Payment Dates','Early Redemption Proba','Cash Flows','Zero Coupon']
-        if 'Model Forward' in res.keys():
-            structure_keys.insert(1,'Model Forward')
-        print(pd.DataFrame({key:res['Structure'][key] for key in structure_keys}))
+        print(pd.DataFrame(res["table"]))
         print('Funding')
-        funding_keys=['Payment Dates','Model Forward','Proba','Cash Flows','Zero Coupon']
-        print(pd.DataFrame({key:res['Funding'][key] for key in funding_keys}))
+        print(pd.DataFrame(res["funding_table"]))
         return
