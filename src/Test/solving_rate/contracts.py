@@ -12,7 +12,8 @@ test_autocall_bond={'_source_tab':'Autocall',
                 'currency':'EUR',
                 'structure_type':'Bond',
                 'yearly_buffer': '0.0%',
-                'UF':'3%'}}
+                'UF':'3%',
+                'solving_choice':'Solve coupon'}}
 
 test_autocall_swap={'_source_tab':'Autocall',
                 'param':{'issue_date':'30.11.2025',
@@ -28,7 +29,8 @@ test_autocall_swap={'_source_tab':'Autocall',
                 'currency':'EUR',
                 'structure_type':'Swap',
                 'yearly_buffer': '0.0%',
-                'UF':'3%'}}
+                'UF':'3%',
+                'solving_choice':'Solve coupon'}}
 
 
 test_digit_bond={'_source_tab':'Digit',
@@ -43,7 +45,8 @@ test_digit_bond={'_source_tab':'Digit',
                 'currency':'EUR',
                 'structure_type':'Bond',
                 'yearly_buffer': '0.0%',
-                'UF':'3%'}}
+                'UF':'3%',
+                'solving_choice':'Solve coupon'}}
 data_callable={'multi-call': 'true',
                 'NC':'5'}
 test_digit_bond['param'].update(data_callable)
@@ -60,7 +63,8 @@ test_digit_swap={'_source_tab':'Digit',
                 'currency':'EUR',
                 'structure_type':'Swap',
                 'yearly_buffer': '0.0%',
-                'UF':'3%'}}
+                'UF':'3%',
+                'solving_choice':'Solve coupon'}}
 
 data_callable={'multi-call': 'true',
                 'NC':'5'}
@@ -78,7 +82,8 @@ test_range_bond={'_source_tab':'RangeAccrual',
                         'currency':'EUR',
                         'structure_type':'Bond',
                         'yearly_buffer': '0.0%',
-                        'UF':'3%'}}
+                        'UF':'3%',
+                        'solving_choice':'Solve coupon'}}
 data_callable={'multi-call': 'true',
                 'NC':'3'}
 test_range_bond['param'].update(data_callable)
@@ -95,7 +100,8 @@ test_range_swap={'_source_tab':'RangeAccrual',
                         'currency':'EUR',
                         'structure_type':'Swap',
                         'yearly_buffer': '0.0%',
-                        'UF':'3%'}}
+                        'UF':'3%',
+                        'solving_choice':'Solve coupon'}}
 data_callable={'multi-call': 'true',
                 'NC':'3'}
 test_range_swap['param'].update(data_callable)
@@ -111,7 +117,8 @@ test_fixed_bond={'_source_tab':'FixedRate',
                         'currency':'EUR',
                         'structure_type':'Bond',
                         'yearly_buffer': '0.0%',
-                        'UF':'3%'}}
+                        'UF':'3%',
+                        'solving_choice':'Solve coupon'}}
 data_callable={'multi-call': 'true',
                 'NC':'3'}
 test_fixed_bond['param'].update(data_callable)
@@ -125,7 +132,8 @@ test_fixed_swap={'_source_tab':'FixedRate',
                         'currency':'EUR',
                         'structure_type':'Swap',
                         'yearly_buffer': '0.0%',
-                        'UF':'3%'}}
+                        'UF':'3%',
+                        'solving_choice':'Solve coupon'}}
 data_callable={'multi-call': 'true',
                 'NC':'3'}
 test_fixed_swap['param'].update(data_callable)

@@ -12,7 +12,9 @@ test_tarn_bond={'_source_tab':'TARN',
                 'underlying2':'EUR CMS 10Y',
                 'fixing_type':'in arrears',
                 'currency':'EUR',
-                'structure_type':'Bond'}}
+                'structure_type':'Bond',
+                'solving_choice':'Price'
+                }}
 
 test_tarn_swap={'_source_tab':'TARN',
                 'param':{'issue_date':'30.11.2025',
@@ -29,7 +31,8 @@ test_tarn_swap={'_source_tab':'TARN',
                 'fixing_type':'in arrears',
                 'currency':'EUR',
                 'structure_type':'Swap',
-                'funding_spread':'100bps'}}
+                'funding_spread':'100bps',
+                'solving_choice':'Price'}}
 
 
 test_autocall_bond={'_source_tab':'Autocall',
@@ -46,7 +49,8 @@ test_autocall_bond={'_source_tab':'Autocall',
                 'fixing_type':'in arrears',
                 'NC':'1',
                 'currency':'EUR',
-                'structure_type':'Bond'}}
+                'structure_type':'Bond',
+                'solving_choice':'Price'}}
 
 test_autocall_swap={'_source_tab':'Autocall',
                 'param':{'issue_date':'30.11.2025',
@@ -63,7 +67,8 @@ test_autocall_swap={'_source_tab':'Autocall',
                 'NC':'1',
                 'currency':'EUR',
                 'structure_type':'Swap',
-                'funding_spread':'100bps'}}
+                'funding_spread':'100bps',
+                'solving_choice':'Price'}}
 
 
 
@@ -79,7 +84,8 @@ test_digit_bond={'_source_tab':'Digit',
                 'memory_effect':'false',
                 'fixing_type':'in arrears',
                 'currency':'EUR',
-                'structure_type':'Bond'}}
+                'structure_type':'Bond',
+                'solving_choice':'Price'}}
 data_callable={'multi-call': 'true',
                 'NC':'5'}
 test_digit_bond['param'].update(data_callable)
@@ -98,7 +104,8 @@ test_digit_swap={'_source_tab':'Digit',
                         'fixing_type':'in arrears',
                         'currency':'EUR',
                         'structure_type':'Swap',
-                        'funding_spread':'90bps'}}
+                        'funding_spread':'90bps',
+                        'solving_choice':'Price'}}
 data_callable={'multi-call': 'true',
                 'NC':'5'}
 
@@ -114,7 +121,8 @@ test_range_bond={'_source_tab':'RangeAccrual',
                         'underlying2':'EUR CMS 10Y',
                         'fixing_type':'in arrears',
                         'currency':'EUR',
-                        'structure_type':'Bond'}}
+                        'structure_type':'Bond',
+                        'solving_choice':'Price'}}
 data_callable={'multi-call': 'true',
                 'NC':'3'}
 test_range_bond['param'].update(data_callable)
@@ -133,7 +141,8 @@ test_range_swap={'_source_tab':'RangeAccrual',
                         'fixing_type':'in arrears',
                         'currency':'EUR',
                         'structure_type':'Swap',
-                        'funding_spread':'70bps'}}
+                        'funding_spread':'70bps',
+                        'solving_choice':'Price'}}
 data_callable={'multi-call': 'true',
                 'NC':'3'}
 test_range_swap['param'].update(data_callable)
