@@ -1,14 +1,14 @@
 import numpy as np
 import QuantLib as ql
-from typing import Union
 from collections import Counter
 from bisect import bisect
+import typing
+from scipy.optimize import minimize
 
 from Pricing.Utilities import Dates,InputConverter,Functions
-from Pricing.Rates import Funding
+
 
 #Coupon Functions
-
 def get_stop_matrix(stop_idxs:list[int],shape:tuple[int,int])-> np.ndarray:
     res=np.zeros(shape)
     for x,i in zip(res,stop_idxs):
@@ -52,9 +52,7 @@ def compute_cdt_digit(simu:np.ndarray,coupon_lvl:float,infine:bool,memory_effect
         
         return coupon_cdt
 
-
 #Contract Functions + Payoff Class
-
 def compute_measure_change_factor(model,rates:np.ndarray,t:float,T:float) -> np.ndarray:
     Pt_T=model.compute_discount_factor_from_rates(rates,t,T)
     return (1/Pt_T)*model.DF(T)/model.DF(t)
@@ -93,68 +91,6 @@ def prep_undl(contract,model,data_rates:dict,include_rates=True) -> dict:
                                                                 contract.underlying_name1,
                                                                 include_rates=include_rates)
             
-def prep_callable_contract(calc_date:ql.Date,contract,model,risky_curve,risky:bool) :
-
-    dic_currency={'EUR':'3M','USD':'Overnight'}
-
-    data_rates=model.generate_rates(calc_date,contract.pay_dates[-1],
-                                    cal=ql.Thirty360(ql.Thirty360.BondBasis),Nbsimu=10000)
-    
-    contract.compute_grid(calc_date,cal=ql.Thirty360(ql.Thirty360.BondBasis))
-    dic_arg=prep_undl(contract,model,data_rates,include_rates=True)
-    if contract.hasunderlying :
-        contract.fwds=[np.mean(x) for x in dic_arg['undl']]
-    
-    res=dict()
-
-    if contract.structure_type=='Swap':
-        funding_leg=Funding.Leg(contract,dic_currency[contract.currency])
-        funding_leg.precomputation(calc_date,model,data_rates)
-        res.update({'funding_leg':funding_leg})
-
-    if not hasattr(contract,'call_dates'):
-
-        contract.proba_recall=np.zeros_like(contract.paygrid)
-        contract.proba_recall[-1]=1
-        contract.res_capital=contract.proba_recall
-        contract.duration=contract.paygrid[-1]
-        res.update({'contract':contract,
-                    'dic_arg':dic_arg})
-
-        return res
-
-    else:
-        data_rates_helper=model.generate_rates(calc_date,contract.pay_dates[-1],cal=ql.Thirty360(ql.Thirty360.BondBasis),
-                                    Nbsimu=1000,seed=42)
-        
-        dic_arg_helper=prep_undl(contract,model,data_rates_helper,include_rates=True)
-        
-        df_cont_helper=[None]*len(contract.call_idxs)  
-        df_exercise=[None]*len(contract.call_idxs)
-        for i,idx in enumerate(contract.call_idxs):
-            t=contract.fixgrid[idx]
-            df_exercise[i]=model.compute_discount_factor_from_rates(dic_arg['rates'][idx],t,
-                                                                    contract.paygrid[idx])*model.DF(contract.fixgrid[idx])
-            df_cont_helper[i]=model.compute_discount_factor_from_rates(dic_arg_helper['rates'][idx],t,
-                                                                        contract.paygrid[idx+1:])*model.DF(contract.fixgrid[idx])
-            if risky:
-                df_exercise[i]*=risky_curve.adjustment(t,contract.paygrid[idx])
-                df_cont_helper[i]*=np.array([risky_curve.adjustment(t,T)  
-                                                for T in contract.paygrid[idx+1:] ])
-
-        measure_change_factor=np.array([compute_measure_change_factor(model,dic_arg['rates'][i],t,contract.paygrid[-1]) 
-                                        for i,t in enumerate(contract.paygrid) ])
-        
-        dic_arg.update({'df_exercise':df_exercise,
-                        'measure_change_factor':measure_change_factor})
-
-        dic_arg_helper.update({'df_continuation':df_cont_helper})
-
-        res.update({'contract':contract,
-                    'dic_arg_helper':dic_arg_helper,
-                    'dic_arg':dic_arg})
-        return res
-
 class Payoff :
 
     def get_common_parameters(self,parameters:dict):
@@ -269,4 +205,47 @@ class Payoff :
             res[key]=value/len(stop_idxs)
         return res
 
+#Result and spread functions
+def organize_structure_table(contract,ZC) -> dict:
 
+    res={'Payment Dates':contract.pay_dates}
+    if hasattr(contract,'fwds'):
+        res.update({'Model Forward':contract.fwds})
+    res.update({
+            'Early Redemption Proba':contract.proba_recall,
+            'Cash Flows':contract.res_coupon,
+            'Zero Coupon':ZC})
+    
+    return res
+
+def organize_funding_table(funding_leg,ZC:np.ndarray)-> dict:
+
+    res={'Payment Dates':funding_leg.pay_dates,
+        'Model Forward':np.mean(funding_leg.fwds,axis=1),
+        'Proba':funding_leg.proba,
+        'Cash Flows': funding_leg.coupons,
+        'Zero Coupon':ZC}
+
+    return res
+
+def spread_interp(risky_curve,cal=ql.Thirty360(ql.Thirty360.BondBasis)) -> typing.Callable:
+    entity=risky_curve.model.entity
+    today=ql.Date.todaysDate()
+    grid=[cal.yearFraction(today,today+ql.Period(p)) for p in entity.tenors]
+
+    return lambda x: np.interp(x,grid,entity.quotes,left=entity.quotes[0],right=entity.quotes[-1])
+
+def get_funding_spread_early_redemption(risky_curve,tgrid:np.ndarray,proba:np.ndarray) ->np.ndarray:
+    c=0.0004
+    interp_spreads=spread_interp(risky_curve)(tgrid) 
+    res = sum(proba*interp_spreads) - c
+    return res
+
+def get_funding_spread(risky_curve,T:float):
+    return spread_interp(risky_curve)(T) 
+
+def optimize_coupon(func_to_solve:typing.Callable):
+    init=0.04
+    bounds=[(0.01,.5)]
+    opt=minimize(func_to_solve,x0=init,method='Nelder-Mead',bounds=bounds)
+    return opt.x[0]
