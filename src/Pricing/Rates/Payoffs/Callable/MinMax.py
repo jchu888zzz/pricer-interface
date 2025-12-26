@@ -3,12 +3,11 @@ import QuantLib as ql
 
 from Pricing.Rates.Payoffs import Base
 from Pricing.Utilities import InputConverter
-from Pricing.Rates.Payoffs.Callable import CallableFeature
-from Pricing.Rates import ResultHelper
+from . import CallableFeature
 
 def precomputation(calc_date:ql.Date,model,data:dict[str:str],risky_curve,risky:bool):
     contract=MinMax(data)
-    return Base.prep_callable_contract(calc_date,contract,model,risky_curve,risky)
+    return CallableFeature.prep_callable_contract(calc_date,contract,model,risky_curve,risky)
 
 def compute_bond_price(dic_prep:dict,risky_curve,risky:bool):
     
@@ -36,10 +35,10 @@ def compute_bond_price(dic_prep:dict,risky_curve,risky:bool):
     prices=contract.res_coupon+contract.res_capital
     price=sum(prices*ZC)
     
-    res=ResultHelper.organize_structure_table(contract,ZC)
+    res=Base.organize_structure_table(contract,ZC)
     res['Price']=price
     res["duration"]=sum(contract.proba_recall*contract.paygrid)
-    res["funding_spread"]=ResultHelper.get_funding_spread_early_redemption(risky_curve,
+    res["funding_spread"]=Base.get_funding_spread_early_redemption(risky_curve,
                                                                 contract.paygrid,contract.proba_recall)
     return res
 
@@ -74,8 +73,8 @@ def compute_swap_price(dic_prep:dict,risky_curve):
     funding_price=sum(funding_leg.coupons*funding_ZC)
     price=structure_price-funding_price
     
-    return {'Structure':ResultHelper.organize_structure_table(contract,ZC),
-            'Funding':ResultHelper.organize_funding_table(funding_leg,funding_ZC),
+    return {'Structure':Base.organize_structure_table(contract,ZC),
+            'Funding':Base.organize_funding_table(funding_leg,funding_ZC),
             'Price':price,
             'duration':sum(contract.proba_recall*contract.paygrid),
             'funding_spread':contract.funding_spread}

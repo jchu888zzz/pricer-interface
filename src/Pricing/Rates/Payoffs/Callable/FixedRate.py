@@ -1,7 +1,8 @@
 import numpy as np
 import QuantLib as ql
 from Pricing.Rates.Payoffs import  Base
-from Pricing.Rates import Funding,ResultHelper
+from Pricing.Rates import Funding
+from . import CallableFeature
 
 def precomputation(calc_date:ql.Date,model,data:dict[str:str],risky_curve,risky:bool):
 
@@ -57,16 +58,16 @@ def precomputation(calc_date:ql.Date,model,data:dict[str:str],risky_curve,risky:
     return res
 
 def compute_bond_price(dic_prep:dict,risky_curve,risky:bool):
-    return ResultHelper.compute_bond_price_callable(dic_prep,risky_curve,risky)
+    return CallableFeature.compute_bond_price_callable(dic_prep,risky_curve,risky)
 
 def compute_swap_price(dic_prep:dict,risky_curve):
-    return ResultHelper.compute_swap_price_callable(dic_prep,risky_curve)
+    return CallableFeature.compute_swap_price_callable(dic_prep,risky_curve)
 
 def solve_coupon_for_bond(dic_prep:dict,risky_curve,risky:bool):
-    return ResultHelper.solve_coupon_for_bond_callable(dic_prep,risky_curve,risky)
+    return CallableFeature.solve_coupon_for_bond_callable(dic_prep,risky_curve,risky)
 
 def solve_coupon_for_swap(dic_prep:dict,risky_curve):
-    return ResultHelper.solve_coupon_for_swap_callable(dic_prep,risky_curve)
+    return CallableFeature.solve_coupon_for_swap_callable(dic_prep,risky_curve)
 
 class Process :
     def compute_price(prep_model:dict,param_contract:dict):
