@@ -62,7 +62,8 @@ QPushButton#btnCMT:checked {
 QPushButton#homeButton,
 QPushButton#pagePrimary,
 QPushButton#submit_btn,
-QPushButton#copyTable {
+QPushButton#copy_input,
+QPushButton#copy_result {
     min-width: 50px;
     min-height: 30px;
     max-width: 110px;
@@ -78,13 +79,15 @@ QPushButton#copyTable {
 QPushButton#homeButton:hover,
 QPushButton#pagePrimary:hover,
 QPushButton#submit_btn:hover,
-QPushButton#copyTable:hover {
+QPushButton#copy_input:hover,
+QPushButton#copy_result:hover {
     background: #c0b490;
 }
 QPushButton#homeButton:pressed,
 QPushButton#pagePrimary:pressed,
 QPushButton#submit_btn:pressed,
-QPushButton#copyTable:pressed {
+QPushButton#copy_input:pressed,
+QPushButton#copy_result:pressed {
     background: #c0b490;
 }
 
@@ -202,10 +205,38 @@ QTableWidget#resultTable
     letter-spacing: 0.5px;
 }
 
-QLabel#label_uf,
-QLabel#label_coupon,
-QLabel#label_duration,
-QLabel#label_spread
+QLabel#label_result
  {
     font: bold 10pt "Segoe UI"
+}
+
+/* QTreeWidget styling to match app theme */
+QTreeWidget#input_tree {
+    background: #0d2b52;
+    color: #dbefff;
+    alternate-background-color: #1a3a5c;
+    border: 1px solid rgba(102, 217, 239, 0.3);
+    border-radius: 6px;
+    font: 9pt "Segoe UI";
+    padding: 4px;
+}
+
+QTreeWidget#input_tree QHeaderView::section {
+    background: #1a3a5c;
+    color: #ffffffff;
+    padding: 6px 8px;
+    border: none;
+    border-right: 1px solid rgba(102, 217, 239, 0.2);
+    font: 9pt "Segoe UI";
+}
+
+
+/* Tree item hover and selection */
+QTreeWidget#input_tree::item:hover {
+    background: rgba(102, 217, 239, 0.1);
+}
+
+QTreeWidget#input_tree::item:selected {
+    background: rgba(102, 217, 239, 0.25);
+    color: #eaffff;
 }
