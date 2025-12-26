@@ -63,6 +63,7 @@ class Ui_RatePage(QWidget):
     def _on_submitted(self, input_data: dict, source_tab: str):
         # add source metadata and re-emit
         data = {'param':input_data,
-                "_source_tab":source_tab}
+                "_source_tab":source_tab,
+                "_source_page":"Rate"}
         self.submitted.emit(data)
         #↨self.sub1.emit()

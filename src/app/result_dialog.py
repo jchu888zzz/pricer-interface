@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt
 import os
 
 from app.ui_pages.LoadingPage import Ui_LoadingPage
-from app.ui_pages.ResultPage import Ui_ResultPage,Ui_ResultPageEquity,Ui_ResultPageRate
+from app.ui_pages.ResultPage import Ui_ResultPageEquity,Ui_ResultPageRate
 
 class ResultDialog(QDialog):
     """
@@ -17,7 +17,7 @@ class ResultDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Results")
         self.setObjectName("ResultDialog")
-        self.setMinimumWidth(550)
+        self.setMinimumSize(1000, 500)
         self.layout = QVBoxLayout(self)
         self.stack = QStackedWidget(self)
         self.layout.addWidget(self.stack)
@@ -27,14 +27,8 @@ class ResultDialog(QDialog):
         self.stack.addWidget(self.loading_page)
 
         # --- Table Page ---
-        #self.result_page = Ui_ResultPage()
         self.result_page=Ui_ResultPageRate()
         self.stack.addWidget(self.result_page)
-
-        # # Demo: button to switch pages (remove in real app)
-        # self.demo_btn = QPushButton("Show Table", self)
-        # self.demo_btn.clicked.connect(self.show_table_page)
-        # self.layout.addWidget(self.demo_btn)
 
         self._apply_style_from_qss()
 
@@ -63,14 +57,16 @@ class ResultDialog(QDialog):
         self.setModal(False)
         self.show()
 
-    def show_table_page(self, data:dict |None):
+    def show_table_page(self, data:tuple[dict]):
         self.stack.setCurrentIndex(1)
         self.loading_page._timer.stop()
         # Stop spinner animation if present
         if self.loading_page._spinner_movie:
             self.loading_page._spinner_movie.stop()
         if data:
-            self.result_page.set_data(data)
+            self.result_page.retrieve_data(data[0],data[1])
+            #self.result_page.set_data(data)
+            self.adjustSize()
 
     def _center_on_parent(self, parent: QWidget):
         # center this dialog on the parent widget
@@ -90,7 +86,7 @@ class ResultDialogEquity(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Results")
         self.setObjectName("ResultDialog")
-        self.setMinimumWidth(550)
+        self.setMinimumSize(700, 400)
         self.layout = QVBoxLayout(self)
         self.stack = QStackedWidget(self)
         self.layout.addWidget(self.stack)
@@ -103,10 +99,6 @@ class ResultDialogEquity(QDialog):
         self.result_page = Ui_ResultPageEquity()
         self.stack.addWidget(self.result_page)
 
-        # # Demo: button to switch pages (remove in real app)
-        # self.demo_btn = QPushButton("Show Table", self)
-        # self.demo_btn.clicked.connect(self.show_table_page)
-        # self.layout.addWidget(self.demo_btn)
 
         self._apply_style_from_qss()
 
@@ -143,6 +135,7 @@ class ResultDialogEquity(QDialog):
             self.loading_page._spinner_movie.stop()
         if data:
             self.result_page.set_data(data)
+            self.adjustSize()
 
     def _center_on_parent(self, parent: QWidget):
         # center this dialog on the parent widget

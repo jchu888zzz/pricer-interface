@@ -1,11 +1,10 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout,QHBoxLayout,QTableWidget, QTableWidgetItem,QLabel,QFormLayout,QApplication,
-    QHeaderView,QPushButton,QTreeWidget,QTreeWidgetItem
+    QHeaderView,QPushButton,QTreeWidget,QTreeWidgetItem, QSizePolicy
 )
 from PySide6.QtCore import Qt
 import json
-import numpy as np
-import QuantLib as ql
+
 
 from Pricing.Utilities import Display,Dates
 
@@ -113,9 +112,8 @@ class Ui_ResultPageRate(QWidget):
         super().__init__()
         self.title1=title1
         self.title2=title2
-        self.setup_ui()
     
-    def setup_ui(self):
+    def setup_ui(self,input:dict,result:dict):
         
         main_layout=QVBoxLayout(self)
         main_layout.setContentsMargins(10,10,10,10)
@@ -141,7 +139,7 @@ class Ui_ResultPageRate(QWidget):
         self.tree_input.setAlternatingRowColors(True)
         left_layout.addWidget(self.tree_input)
 
-        self.display_left(self.input)
+        self.display_left(input)
 
         btn_copy_input=QPushButton("Copy Input")
         btn_copy_input.setObjectName("copy_input")
@@ -150,7 +148,7 @@ class Ui_ResultPageRate(QWidget):
 
         #Right Side - Result
         right_widget=QWidget()
-        self.right_layout=QFormLayout(right_widget)
+        self.right_layout=QVBoxLayout(right_widget)
         self.right_layout.setContentsMargins(0,0,0,0)
         self.right_layout.setSpacing(8)
 
@@ -159,28 +157,36 @@ class Ui_ResultPageRate(QWidget):
         self.right_title.setAlignment(Qt.AlignCenter)
         self.right_layout.addWidget(self.right_title)
 
+        # Results form for labels
+        self.results_form=QVBoxLayout()
+        self.results_form.setContentsMargins(0,0,0,0)
+        self.results_form.setSpacing(5)
+        self.right_layout.addLayout(self.results_form)
+
         self.table = QTableWidget()
         self.table.setObjectName("resultTable")
-        self.display_right(self.result)
+        self.display_right(result)
 
         btn_copy_res=QPushButton("Copy Result")
         btn_copy_res.setObjectName("copy_result")
         btn_copy_res.clicked.connect(self.export_result_to_clipboard)
         self.right_layout.addWidget(btn_copy_res)
 
-        layout.addWidget(left_widget,1)
-        layout.addWidget(right_widget,1)
+        layout.addWidget(left_widget, 2)
+        layout.addWidget(right_widget, 3)
 
         main_layout.addLayout(layout)
 
-    def retrieve_values(self,input:dict,result:dict):
+    def retrieve_data(self,input:dict,result:dict):
         self.input=input
-        self.result=result
+        self.result=self._format_data(result)
+        self.setup_ui(self.input,self.result)
 
     def display_left(self,data:dict):
 
         self.tree_input.clear()
         self._fill_tree(self.tree_input,data)
+        self.tree_input.resizeColumnToContents(0)
         self.tree_input.resizeColumnToContents(1)
     
     def _format_data(self,data:dict) -> dict:
@@ -209,24 +215,44 @@ class Ui_ResultPageRate(QWidget):
             if key=="table":
                 continue
             if isinstance(value,str):
-                label=QLabel(str(value))
-                label.setObjectName("label_result")
-                self.right_layout.addRow(key,label)
+                # Create a horizontal layout for each label pair
+                item_layout = QHBoxLayout()
+                item_layout.setContentsMargins(0,0,0,0)
+                item_layout.setSpacing(10)
+                
+                key_label = QLabel(key + ":")
+                key_label.setObjectName("label_result_key")
+                value_label = QLabel(str(value))
+                value_label.setObjectName("label_result")
+                
+                item_layout.addWidget(key_label)
+                item_layout.addWidget(value_label)
+                item_layout.addStretch()
+                self.results_form.addLayout(item_layout)
 
         self.table.setColumnCount(len(data["table"]))
         self.table.setHorizontalHeaderLabels(list(data["table"].keys()))
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        for col in range(len(data["table"])):
+            if col == len(data["table"]) - 1:
+                # Last column stretches to fill remaining space
+                self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.Stretch)
+            else:
+                self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeToContents)
 
         #All elements should be of the same size
         nb_rows=len(list(data["table"].values())[0])
         self.table.setRowCount(nb_rows)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         for col,values in enumerate(data["table"].values()):
             for row,item in enumerate(values):
                 cell=QTableWidgetItem(item)
                 self.table.setItem(row,col,cell)
         
         self.table.resizeRowsToContents()
+        self.table.setMinimumWidth(400)
+        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.right_layout.addWidget(self.table)
 
     def _fill_tree(self,tree:QTreeWidget,data:dict):
 
@@ -256,6 +282,7 @@ class Ui_ResultPageRate(QWidget):
             lines.append(f"{key}\t{value}")
         
         lines.append("")
+        lines.append("\t".join(list(data["table"].keys())))
         nb_rows=len(list(data["table"].values())[0])
         for i in range(nb_rows):
             lines.append("\t".join(data["table"][key][i] for key in data["table"].keys()))
@@ -335,7 +362,6 @@ class Ui_ResultPageEquity(QWidget):
 
         self.table.resizeRowsToContents()
         self.text="\n".join(lines)
-    
     
     def copy_table(self):
         clipboard = QApplication.clipboard()
