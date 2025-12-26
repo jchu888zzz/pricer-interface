@@ -22,14 +22,13 @@ def get_filename_from_date(date:ql.Date,prefix='market_data_') -> str:
     name= y +'-'+ m +'-'+ d
     return prefix + name +'.xlsx'
 
-
 def select_row_from_keywords(df:pd.DataFrame,col:list[str],keywords:list[str]):
     mask=np.ones(len(df)).astype(bool)
     for word in keywords:
         mask*=df[col].str.contains(word)
     return mask
 
-def concatenate_dataframe_from_mktdata_file(File:pd.DataFrame,sheet_list:list[str]):
+def concat_df_from_mktdata_file(File:pd.DataFrame,sheet_list:list[str]):
 
     df_list=[]
     for sheet in sheet_list:
@@ -60,7 +59,7 @@ def concatenate_df(File:pd.DataFrame,keyword:str,sheet_list:list[str]) -> pd.Dat
 
 def get_ref_quote(File:pd.ExcelFile,cur_name:str,calc_date:ql.Date):
 
-    df=concatenate_dataframe_from_mktdata_file(File,sheet_list=('Swaps',))
+    df=concat_df_from_mktdata_file(File,sheet_list=('Swaps',))
     mask=select_row_from_keywords(df,"Description",keywords=[cur_name,'Swap_rate'])
     # df=concatenate_df(File,cur_name,sheet_list=('Deposits','Futures','Swaps'))
     #mask=df.Description.str.contains("Basis_swap") & df.Description.str.contains("V_3M")
