@@ -1,10 +1,9 @@
 import numpy as np
 import QuantLib as ql
 
-from Pricing.Utilities import InputConverter
+from Pricing.Utilities import InputConverter,Functions
 from Pricing.Rates.Payoffs import Base
-from Pricing.Utilities import Functions
-from Pricing.Rates import Funding,ResultHelper
+from Pricing.Rates import Funding
 
 def precomputation(calc_date:ql.Date,model,data:dict[str:str]):
 
@@ -34,65 +33,53 @@ def precomputation(calc_date:ql.Date,model,data:dict[str:str]):
         res.update({'funding_leg':funding_leg})
     return res 
 
-def compute_bond_price(dic_prep:dict,risky_curve,risky:bool):
-    
+def compute_price(dic_prep:dict,risky_curve):
+
+    res=dict()
+
     contract=dic_prep['contract']
-    ZC=risky_curve.Discount_Factor(contract.paygrid,risky)
-
-    dic_arg=contract.update_arg_pricing(contract.coupon,dic_prep['dic_arg']) 
+    dic_arg=contract.update_arg_pricing(contract.coupon,dic_prep['dic_arg'])
     cashflows,stop_idxs=contract.compute_cashflows(dic_arg,include_stop_idx=True)
+    contract.res_coupon=np.mean(cashflows,axis=0)
 
-    contract.res_coupon=np.mean(cashflows,axis=0)
-    contract.proba_recall=contract.compute_recall_proba(stop_idxs)
-    contract.res_capital=Base.compute_bond_measure_change(dic_prep['measure_change_factor'],
+    if contract.structure_type=="Bond":
+
+        contract.proba_recall=contract.compute_recall_proba(stop_idxs)
+        contract.res_capital=Base.compute_bond_measure_change(dic_prep['measure_change_factor'],
                                                               stop_idxs)
-    contract.res_coupon=np.mean(cashflows,axis=0)
-    prices=contract.res_coupon+contract.res_capital
-    price=sum(prices*ZC)
+        ZC=risky_curve.Discount_Factor(contract.paygrid,risky=True)
+        price=sum((contract.res_coupon+contract.res_capital)*ZC)
     
-    res=ResultHelper.organize_structure_table(contract,ZC)
-    res["Price"]=price
-    res["duration"]=sum(contract.proba_recall*contract.paygrid)
+    elif contract.structure_type=="Swap":
+        funding_leg=dic_prep['funding_leg']
+        funding_leg.compute_values_for_early_redemption(stop_idxs,contract.funding_spread)
+        funding_ZC=risky_curve.Discount_Factor(funding_leg.paygrid,risky=False)
+        funding_price=sum(funding_leg.coupons*funding_ZC)
+
+        res['funding_table']=Base.organize_funding_table(funding_leg,funding_ZC)
+
+        ZC=risky_curve.Discount_Factor(contract.paygrid,risky=False)
+        structure_price=sum(contract.res_coupon*ZC)
+
+        price=structure_price-funding_price
+    
+    else:
+        raise ValueError(f"{contract.structure_type} not recognized")
+    
+    res["table"]=Base.organize_structure_table(contract,ZC)
+    res["price"]=price
+    res["duration"]=contract.duration
     res["coupon"]=contract.coupon
-    res["funding_spread"]=ResultHelper.get_funding_spread_early_redemption(risky_curve,
+    res["funding_spread"]=Base.get_funding_spread_early_redemption(risky_curve,
                                                                            contract.paygrid,contract.proba_recall)
     return res
-
-def compute_swap_price(dic_prep:dict,risky_curve):
-    
-    contract=dic_prep['contract']
-    ZC=risky_curve.Discount_Factor(contract.paygrid,risky=False)
-
-    funding_leg=dic_prep['funding_leg']
-    funding_ZC=risky_curve.Discount_Factor(funding_leg.paygrid,risky=False)
-    
-    dic_arg=contract.update_arg_pricing(contract.coupon,dic_prep['dic_arg']) 
-    cashflows,stop_idxs=contract.compute_cashflows(dic_arg,include_stop_idx=True)
-    contract.res_coupon=np.mean(cashflows,axis=0)
-    contract.proba_recall=contract.compute_recall_proba(stop_idxs)
-
-    funding_leg.compute_values_for_early_redemption(stop_idxs,contract.funding_spread)
-    structure_price=sum(contract.res_coupon*ZC)
-    funding_price=sum(funding_leg.coupons*funding_ZC)
-    price=structure_price-funding_price
-
-    return {'Structure':ResultHelper.organize_structure_table(contract,ZC),
-            'Funding':ResultHelper.organize_funding_table(funding_leg,funding_ZC),
-            'Price':price,
-            'duration':sum(contract.proba_recall*contract.paygrid),
-            'coupon':contract.coupon,
-            'funding_spread':ResultHelper.get_funding_spread_early_redemption(risky_curve,
-                                                                           contract.paygrid,contract.proba_recall)}
-
 
 class Process :
     def compute_price(prep_model:dict,param_contract:dict):
         dic_prep=precomputation(prep_model['calc_date'],prep_model['model'],
                                 param_contract)
-        if param_contract['structure_type']=='Bond':
-            return compute_bond_price(dic_prep,prep_model['risky_curve'],risky=True)
-        else:
-            return compute_swap_price(dic_prep,prep_model['risky_curve'])
+
+        return compute_price(dic_prep,prep_model['risky_curve'])
 
 class TARN(Base.Payoff):
 
