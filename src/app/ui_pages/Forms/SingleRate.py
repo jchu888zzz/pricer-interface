@@ -190,9 +190,11 @@ class Ui_Tarn(QWidget):
         layout1.addRow("Fixing Type :", self.fixing_type)
 
         self.target = Target()
+        self.target.setValue(10.0)
         layout1.addRow("Target :", self.target)
 
         self.coupon = Coupon()
+        self.coupon.setValue(5.0)
         layout1.addRow("Coupon :", self.coupon)
 
         self.coupon_level = CouponLevel()
@@ -246,8 +248,8 @@ class Ui_Tarn(QWidget):
             "fixing_days_offset": str(self.fixing_offset.value()),
             "frequency": self.frequency.currentText(),
             "fixing_type":self.fixing_type.currentText(),
-            "target":str(self.target.value()),
-            "coupon":str(self.coupon)+'%',
+            "target":str(self.target.value())+'%',
+            "coupon":str(self.coupon.value())+'%',
             "coupon_level": str(self.coupon_level.value())+'%',
             "underlying1":self.undl.currentText(),
             "in-fine":bool_to_str(self.in_fine.isChecked())

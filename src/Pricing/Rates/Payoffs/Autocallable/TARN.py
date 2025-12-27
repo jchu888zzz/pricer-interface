@@ -69,7 +69,7 @@ def compute_price(dic_prep:dict,risky_curve):
     
     res["table"]=Base.organize_structure_table(contract,ZC)
     res["price"]=price
-    res["duration"]=contract.duration
+    res["duration"]=sum(contract.proba_recall*contract.paygrid)
     res["coupon"]=contract.coupon
     res["funding_spread"]=Base.get_funding_spread_early_redemption(risky_curve,
                                                                 contract.paygrid,contract.proba_recall,
