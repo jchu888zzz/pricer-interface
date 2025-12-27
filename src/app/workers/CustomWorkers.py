@@ -207,7 +207,7 @@ class PriceManager(QObject):
         self.thread = QThread()
         self.result_dialog_class = dialog_class
         self.task_dialogs = {}  # Store dialogs for each task
-        
+        self.task_count=0
         # Move worker to thread
         self.worker.moveToThread(self.thread)
         
@@ -221,6 +221,7 @@ class PriceManager(QObject):
     @Slot(str)
     def _on_task_started(self, task_id: str):
         """Handle task started - show loading page."""
+        self.task_count+=1
         self.task_started.emit(task_id)
         if task_id in self.task_dialogs:
             dialog = self.task_dialogs[task_id]
