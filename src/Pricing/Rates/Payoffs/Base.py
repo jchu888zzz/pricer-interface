@@ -195,7 +195,7 @@ class Payoff :
 
         if hasattr(self,"guaranteed_coupon_dates"):
             self.guaranteed_coupon_idxs=[Functions.find_idx(self.pay_dates,x) for x in self.guaranteed_coupon_dates if x> start]
-            self.NC=max(self.guaranteed_coupon_idxs)
+            self.NC=max(self.guaranteed_coupon_idxs) if self.guaranteed_coupon_idxs else 1
 
     def compute_funding_adjustment(self,calc_date:ql.Date):
         if self.issue_date> calc_date+ql.Period('2M'):
@@ -254,3 +254,4 @@ def optimize_coupon(func_to_solve:typing.Callable):
     bounds=[(0.01,.5)]
     opt=minimize(func_to_solve,x0=init,method='Nelder-Mead',bounds=bounds)
     return opt.x[0]
+
