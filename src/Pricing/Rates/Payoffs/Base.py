@@ -7,7 +7,6 @@ from scipy.optimize import minimize
 
 from Pricing.Utilities import Dates,InputConverter,Functions
 
-
 #Coupon Functions
 def get_stop_matrix(stop_idxs:list[int],shape:tuple[int,int])-> np.ndarray:
     res=np.zeros(shape)
@@ -198,6 +197,12 @@ class Payoff :
             self.guaranteed_coupon_idxs=[Functions.find_idx(self.pay_dates,x) for x in self.guaranteed_coupon_dates if x> start]
             self.NC=max(self.guaranteed_coupon_idxs)
 
+    def compute_funding_adjustment(self,calc_date:ql.Date):
+        if self.issue_date> calc_date+ql.Period('2M'):
+            self.funding_adjustment= 0.95
+            return
+        self.funding_adjustment= 1
+
     def compute_recall_proba(self,stop_idxs):
         dic_res=Counter(stop_idxs)
         res=np.zeros(len(self.paygrid))
@@ -235,14 +240,14 @@ def spread_interp(risky_curve,cal=ql.Thirty360(ql.Thirty360.BondBasis)) -> typin
 
     return lambda x: np.interp(x,grid,entity.quotes,left=entity.quotes[0],right=entity.quotes[-1])
 
-def get_funding_spread_early_redemption(risky_curve,tgrid:np.ndarray,proba:np.ndarray) ->np.ndarray:
+def get_funding_spread_early_redemption(risky_curve,tgrid:np.ndarray,proba:np.ndarray,adjustment:float) ->np.ndarray:
     c=0.0004
     interp_spreads=spread_interp(risky_curve)(tgrid) 
     res = sum(proba*interp_spreads) - c
-    return res
+    return res*adjustment
 
-def get_funding_spread(risky_curve,T:float):
-    return spread_interp(risky_curve)(T) 
+def get_funding_spread(risky_curve,T:float,adjustment:float):
+    return spread_interp(risky_curve)(T)*adjustment 
 
 def optimize_coupon(func_to_solve:typing.Callable):
     init=0.04

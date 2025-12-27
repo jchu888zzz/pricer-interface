@@ -12,6 +12,7 @@ def precomputation(calc_date:ql.Date,model,data:dict[str:str]):
                        cal=ql.Thirty360(ql.Thirty360.BondBasis),Nbsimu=10000,seed=0)
     
     contract.compute_grid(calc_date,cal=ql.Thirty360(ql.Thirty360.BondBasis))
+    contract.compute_funding_adjustment(calc_date)
     dic_arg=Base.prep_undl(contract,model,data_rates,include_rates=True)
     
     measure_change_factor=np.array([Base.compute_measure_change_factor(model,dic_arg['rates'][i],t,contract.paygrid[-1]) 
@@ -71,7 +72,8 @@ def compute_price(dic_prep:dict,risky_curve):
     res["duration"]=contract.duration
     res["coupon"]=contract.coupon
     res["funding_spread"]=Base.get_funding_spread_early_redemption(risky_curve,
-                                                                           contract.paygrid,contract.proba_recall)
+                                                                contract.paygrid,contract.proba_recall,
+                                                                contract.funding_adjustment)
     return res
 
 class Process :

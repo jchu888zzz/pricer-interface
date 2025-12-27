@@ -13,6 +13,7 @@ def precomputation(calc_date:ql.Date,model,data:dict[str:str]):
                        cal=ql.Thirty360(ql.Thirty360.BondBasis),Nbsimu=10000,seed=0)
     
     contract.compute_grid(calc_date,cal=ql.Thirty360(ql.Thirty360.BondBasis))
+    contract.compute_funding_adjustment(calc_date)
     dic_arg=Base.prep_undl(contract,model,data_rates,include_rates=True)
     stop_idxs=contract.compute_stop_idxs(dic_arg['undl'])
     
@@ -71,14 +72,17 @@ def compute_price(dic_prep:dict,risky_curve):
     res["duration"]=contract.duration
     res["coupon"]=contract.coupon
     res["funding_spread"]=Base.get_funding_spread_early_redemption(risky_curve,
-                                                                           contract.paygrid,contract.proba_recall)
+                                                                contract.paygrid,contract.proba_recall,
+                                                                contract.funding_adjustment)
     return res
 
 def solve_coupon(dic_prep:dict,risky_curve):
 
     contract=dic_prep['contract']
     target=contract.UF+contract.yearly_buffer*contract.paygrid[-1]
-    res_funding=Base.get_funding_spread_early_redemption(risky_curve,contract.paygrid,contract.proba_recall)
+    res_funding=Base.get_funding_spread_early_redemption(risky_curve,
+                                                        contract.paygrid,contract.proba_recall,
+                                                        contract.funding_adjustment)
 
     if contract.structure_type=="Bond":
         ZC=risky_curve.Discount_Factor(contract.paygrid,risky=True)

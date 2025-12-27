@@ -11,6 +11,7 @@ def precomputation(calc_date:ql.Date,model,data:dict[str:str],risky_curve,risky:
     dic_currency={'EUR':'3M','USD':'Overnight'}
 
     contract.compute_grid(calc_date,cal=ql.Thirty360(ql.Thirty360.BondBasis))
+    contract.compute_funding_adjustment(calc_date)
     data_rates=model.generate_rates(calc_date,contract.pay_dates[-1],
                                     cal=ql.Thirty360(ql.Thirty360.BondBasis),Nbsimu=10000,seed=0)
     dic_arg=model.compute_prep_for_swaption_from_rates(data_rates,contract.fixgrid,

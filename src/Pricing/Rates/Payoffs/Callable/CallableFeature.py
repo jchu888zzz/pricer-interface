@@ -130,6 +130,7 @@ def prep_callable_contract(calc_date:ql.Date,contract,model,risky_curve,risky:bo
                                     cal=ql.Thirty360(ql.Thirty360.BondBasis),Nbsimu=10000)
     
     contract.compute_grid(calc_date,cal=ql.Thirty360(ql.Thirty360.BondBasis))
+    contract.compute_funding_adjustment(calc_date)
     dic_arg=Base.prep_undl(contract,model,data_rates,include_rates=True)
     if contract.hasunderlying :
         contract.fwds=[np.mean(x) for x in dic_arg['undl']]
@@ -215,7 +216,8 @@ def compute_bond_price_callable(dic_prep:dict,risky_curve,risky:bool):
     res["duration"]=sum(contract.proba_recall*contract.paygrid)
     res["coupon"]=contract.coupon
     res["funding_spread"]=Base.get_funding_spread_early_redemption(risky_curve,
-                                                                contract.paygrid,contract.proba_recall)
+                                                                contract.paygrid,contract.proba_recall,
+                                                                contract.funding_adjustment)
     return res
 
 def compute_swap_price_callable(dic_prep:dict,risky_curve):
@@ -256,7 +258,8 @@ def compute_swap_price_callable(dic_prep:dict,risky_curve):
     res["duration"]=sum(contract.proba_recall*contract.paygrid)
     res["coupon"]=contract.coupon
     res["funding_spread"]=Base.get_funding_spread_early_redemption(risky_curve,
-                                                                contract.paygrid,contract.proba_recall)
+                                                                contract.paygrid,contract.proba_recall,
+                                                                contract.funding_adjustment)
     res['funding_table']=Base.organize_funding_table(funding_leg,funding_ZC)
     return res
 
@@ -268,7 +271,7 @@ def solve_coupon_for_bond_callable(dic_prep:dict,risky_curve,risky:bool):
     ZC=risky_curve.Discount_Factor(contract.paygrid,risky)
 
     if not 'dic_arg_helper' in dic_prep.keys():
-        res_funding=Base.get_funding_spread(risky_curve,contract.paygrid[-1])
+        res_funding=Base.get_funding_spread(risky_curve,contract.paygrid[-1],contract.funding_adjustment)
         def func_to_solve(x:float):
             dic_arg=contract.update_arg_pricing(x,dic_prep['dic_arg']) 
             cashflows=contract.compute_cashflows(dic_arg)
@@ -301,7 +304,8 @@ def solve_coupon_for_bond_callable(dic_prep:dict,risky_curve,risky:bool):
         stop_idxs=compute_stop_idxs_with_undl(contract,regressions,dic_arg,
                                             deg,include_principal=True)
         proba_recall=contract.compute_recall_proba(stop_idxs)
-        res_funding=Base.get_funding_spread_early_redemption(risky_curve,contract.paygrid,proba_recall)
+        res_funding=Base.get_funding_spread_early_redemption(risky_curve,contract.paygrid,
+                                                            proba_recall,contract.funding_adjustment)
 
         return res_coupon,res_funding
 
@@ -316,7 +320,7 @@ def solve_coupon_for_swap_callable(dic_prep:dict,risky_curve):
     ZC=risky_curve.Discount_Factor(contract.paygrid,risky=False)
 
     if not 'dic_arg_helper' in dic_prep.keys():
-        res_spread=Base.get_funding_spread(risky_curve,contract.paygrid[-1])
+        res_spread=Base.get_funding_spread(risky_curve,contract.paygrid[-1],contract.funding_adjustment)
         # compute coupons and proba
         funding_leg.compute_values(res_spread) 
         funding_price=sum(funding_leg.coupons*funding_ZC)
@@ -342,7 +346,7 @@ def solve_coupon_for_swap_callable(dic_prep:dict,risky_curve):
             stop_idxs=compute_stop_idxs_with_undl(contract,regressions,dic_arg,
                                                 deg,include_principal=True)
             proba_recall=contract.compute_recall_proba(stop_idxs)
-            funding_spread=Base.get_funding_spread_early_redemption(risky_curve,contract.paygrid,proba_recall)
+            funding_spread=Base.get_funding_spread_early_redemption(risky_curve,contract.paygrid,proba_recall,contract.funding_adjustment)
             #Use spread to compute swap value
             regressions=get_regression_for_swap_with_undl(contract,dic_arg_helper,
                                                         funding_leg,funding_spread,deg)
@@ -367,6 +371,6 @@ def solve_coupon_for_swap_callable(dic_prep:dict,risky_curve):
         stop_idxs=compute_stop_idxs_with_undl(contract,regressions,dic_arg,
                                             deg,include_principal=True)
         proba_recall=contract.compute_recall_proba(stop_idxs)
-        res_funding=Base.get_funding_spread_early_redemption(risky_curve,contract.paygrid,proba_recall)
+        res_funding=Base.get_funding_spread_early_redemption(risky_curve,contract.paygrid,proba_recall,contract.funding_adjustment)
 
         return res_coupon,res_funding
