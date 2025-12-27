@@ -232,7 +232,9 @@ class CallableWidget(QWidget):
         layout.addRow("",self.stack)
     
     def _retrieve_input(self) -> dict:
-
+        
+        if not self.is_callable.isChecked():
+            return {}
         if self.diff_calendar.isChecked():
             return {'first_call_date':self.first_call_date.date().toString("dd.MM.yyyy"),
                         'call_frequency':self.call_frequency.currentText()}
