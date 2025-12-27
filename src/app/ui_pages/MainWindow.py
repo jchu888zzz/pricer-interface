@@ -37,14 +37,14 @@ class Ui_MainWindow(object):
         sidebar_layout.setSpacing(0)
 
         # Header / logo
-        self.logo = QLabel("CIC", self.sidebar)
+        self.logo = QLabel("App", self.sidebar)
         self.logo.setObjectName("logo")
         self.logo.setAlignment(Qt.AlignCenter)
         self.logo.setMinimumHeight(48)
         sidebar_layout.addWidget(self.logo)
 
         # Navigation buttons
-        self.btnHome = QPushButton(" Home", self.sidebar)
+        self.btnHome = QPushButton("Home", self.sidebar)
         self.btnHome.setObjectName("btnHome")
         self.btnHome.setCheckable(True)
         self.btnHome.setChecked(True)

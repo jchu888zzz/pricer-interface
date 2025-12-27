@@ -63,7 +63,8 @@ class MainWindow(QMainWindow):
                       "CMT":RateGetResults.compute_result_cmt,
                       "SpreadCMT":RateGetResults.compute_result_cmt}
         
-        self.pricing_manager.add_task("task_rate",PAGE_MAPPING.get(input["_source_page"]),args=(self.mkt_data,input))
+        self.pricing_manager.add_task(f"task_{self.pricing_manager.task_count}",
+                                      PAGE_MAPPING.get(input["_source_page"]),args=(self.mkt_data,input))
         
 
     def _setup_logic(self):
