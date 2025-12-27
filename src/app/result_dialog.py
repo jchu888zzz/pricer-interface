@@ -17,7 +17,7 @@ class ResultDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Results")
         self.setObjectName("ResultDialog")
-        self.setMinimumSize(1000, 500)
+        self.setMinimumSize(920, 480)
         self.layout = QVBoxLayout(self)
         self.stack = QStackedWidget(self)
         self.layout.addWidget(self.stack)
@@ -66,7 +66,7 @@ class ResultDialog(QDialog):
         if data:
             self.result_page.retrieve_data(data[0],data[1])
             #self.result_page.set_data(data)
-            self.adjustSize()
+            #self.adjustSize()
 
     def _center_on_parent(self, parent: QWidget):
         # center this dialog on the parent widget

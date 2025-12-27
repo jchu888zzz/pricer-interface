@@ -210,6 +210,12 @@ QLabel#label_result
     font: bold 10pt "Segoe UI"
 }
 
+QLabel#dialog_title
+ {
+    font: bold 12pt "Segoe UI"
+}
+
+
 /* QTreeWidget styling to match app theme */
 QTreeWidget#input_tree {
     background: #0d2b52;

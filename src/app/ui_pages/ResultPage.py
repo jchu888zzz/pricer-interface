@@ -19,10 +19,10 @@ class Ui_ResultPageRate(QWidget):
         
         main_layout=QVBoxLayout(self)
         main_layout.setContentsMargins(10,10,10,10)
-        main_layout.setSpacing(10)
+        main_layout.setSpacing(0)
 
         layout=QHBoxLayout()
-        layout.setSpacing(10)
+        layout.setSpacing(0)
 
         #Left Side - Input
         left_widget=QWidget()
@@ -31,7 +31,7 @@ class Ui_ResultPageRate(QWidget):
         left_layout.setSpacing(8)
 
         self.left_title=QLabel(self.title1)
-        self.left_title.setObjectName("input_title")
+        self.left_title.setObjectName("dialog_title")
         self.left_title.setAlignment(Qt.AlignCenter)
         left_layout.addWidget(self.left_title)
 
@@ -55,7 +55,7 @@ class Ui_ResultPageRate(QWidget):
         self.right_layout.setSpacing(8)
 
         self.right_title=QLabel(self.title2)
-        self.right_title.setObjectName("result_title")
+        self.right_title.setObjectName("dialog_title")
         self.right_title.setAlignment(Qt.AlignCenter)
         self.right_layout.addWidget(self.right_title)
 
@@ -74,8 +74,9 @@ class Ui_ResultPageRate(QWidget):
         btn_copy_res.clicked.connect(self.export_result_to_clipboard)
         self.right_layout.addWidget(btn_copy_res)
 
+        #Layout ratio
         layout.addWidget(left_widget, 2)
-        layout.addWidget(right_widget, 3)
+        layout.addWidget(right_widget, 5)
 
         main_layout.addLayout(layout)
 
@@ -122,9 +123,12 @@ class Ui_ResultPageRate(QWidget):
                 item_layout.setContentsMargins(0,0,0,0)
                 item_layout.setSpacing(10)
                 
-                key_label = QLabel(key + ":")
+                item_layout.addStretch()
+                key_label = QLabel(key + " :")
                 key_label.setObjectName("label_result_key")
+                key_label.setAlignment(Qt.AlignCenter)
                 value_label = QLabel(str(value))
+                value_label.setAlignment(Qt.AlignCenter)
                 value_label.setObjectName("label_result")
                 
                 item_layout.addWidget(key_label)
@@ -135,11 +139,8 @@ class Ui_ResultPageRate(QWidget):
         self.table.setColumnCount(len(data["table"]))
         self.table.setHorizontalHeaderLabels(list(data["table"].keys()))
         for col in range(len(data["table"])):
-            if col == len(data["table"]) - 1:
-                # Last column stretches to fill remaining space
-                self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.Stretch)
-            else:
-                self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeToContents)
+            # All columns stretch to fill remaining space
+            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.Stretch)
 
         #All elements should be of the same size
         nb_rows=len(list(data["table"].values())[0])
@@ -151,8 +152,9 @@ class Ui_ResultPageRate(QWidget):
                 cell=QTableWidgetItem(item)
                 self.table.setItem(row,col,cell)
         
+        self.table.resizeColumnsToContents()
         self.table.resizeRowsToContents()
-        self.table.setMinimumWidth(400)
+        # self.table.setMinimumWidth(400)
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.right_layout.addWidget(self.table)
 
