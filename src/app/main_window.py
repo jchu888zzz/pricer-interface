@@ -9,6 +9,7 @@ from .ui_pages.MainWindow import Ui_MainWindow
 from .result_dialog import  ResultDialog
 
 import Pricing.Rates.GetResults as RateGetResults
+import Pricing.Equity.GetResults as EquityGetResults
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -65,7 +66,11 @@ class MainWindow(QMainWindow):
         
         self.pricing_manager.add_task(f"task_{self.pricing_manager.task_count}",
                                       PAGE_MAPPING.get(input["_source_page"]),args=(self.mkt_data,input))
+    
+    def get_result_equity(self,input:dict):
         
+        self.pricing_manager.add_task(f"task_{self.pricing_manager.task_count}",
+                                      EquityGetResults.compute_result,args=input)
 
     def _setup_logic(self):
         # Wire nav buttons to stacked widget pages
@@ -79,6 +84,7 @@ class MainWindow(QMainWindow):
         self.ui.pageRate.submitted.connect(self.get_result)
         self.ui.pageCMT.submitted.connect(self.get_result)
         self.ui.pageSpreadCMT.submitted.connect(self.get_result)
+        self.ui.pageEquity.submitted.connect(self.get_result_equity)
 
         # Keep nav buttons exclusive
         self._nav_group = QButtonGroup(self)

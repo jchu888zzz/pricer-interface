@@ -3,16 +3,22 @@ import pandas as pd
 import scipy as sp
 import datetime
 import os
+import QuantLib as ql
 
 ice_path = "//Umilp-p2.cdm.cm-cic.fr/cic-lai-lae-cigogne$/1_Structuration/13bis_ICE"
 spread_path = "//Umilp-p2.cdm.cm-cic.fr/cic-lai-lae-cigogne$/1_Structuration/6_Lexifi/Credit spread CIC"
 markit_path = "//Umilp-p2.cdm.cm-cic.fr/cic-lai-lae-cigogne$/1_Structuration/13_Markit/Market_Data"
+
+path_markit_names=r"\\Umilp-p2.cdm.cm-cic.fr\cic-lai-lae-cigogne$\1_Structuration\19_Quant\Methodo Funding\Markit\Names.xlsx"
+ref_table = pd.read_excel(path_markit_names, header = 0)
+
 
 def TimeLeft(date1, date2, conv = 365):
     
     date1 = datetime.datetime.strptime(date1, "%Y-%m-%d").date()
     date2 = datetime.datetime.strptime(date2, "%Y-%m-%d").date()
     return (date2 - date1).days/conv
+
 
 def prep_data_markit(ValuationDate, MarkitPath, stock, ref_table):
                     
@@ -59,3 +65,36 @@ def spread_prep(spread_data):
     Mat = np.array([float(mat[:-1])/12 if mat[-1] == "M" else float(mat[:-1]) for mat in Mat])
     Spreads =spread_data.iloc[:,2].to_numpy() 
     return lambda x: np.interp(x,Mat,Spreads,left=0,right=Spreads[-1])
+
+
+def convert_input(input:dict) -> dict:
+    """ convert input and fill values to compute results"""
+    res=input.copy()
+
+    res["MC"] = 1/365, 10000
+    value_date=ql.TARGET().advance(ql.Date.todaysDate(), -1, ql.Days)
+    res["value_date"] = value_date
+    if res['currency']=="EUR":
+        spread_data = pd.read_excel(os.path.join(spread_path, "Refi_CIC_EUR.xls"),sheet_name="CIC_EUR")
+    elif res['currency']=="USD":
+        spread_data=pd.read_excel(os.path.join(spread_path, "Refi_CIC_EUR.xls"),sheet_name="CIC_USD")
+    else:
+        raise ValueError(" Unavailable currency")
+    res["fund_curve"] = spread_prep(spread_data)
+    
+    #convert param
+    res["start_date"]= ql.Date(input["issue_date"], "%d.%m.%Y")
+    res["trade_date"]= ql.Date(input["initial_strike_date"], "%d.%m.%Y")
+    res["mat"] = int(input["maturity"])
+    res["call_lvl"] = float(input["autocall_level"])*0.01
+
+    freq_dic={'Annually':'1Y','Semi-annually':'6M','Quarterly':'3M','Monthly':'1M'}
+    res["freq"] = freq_dic[input["frequency"]]
+    res["per_nocall"] = int(input["periods_no_autocall"])
+    res["offset"] = int(input["fixing_offset"])
+
+    vol_surface, forward, df = prep_data_markit(value_date.ISO(), markit_path, input["underlying"], ref_table)
+    res["vol_surface"]=vol_surface
+    res["forward"]=forward
+    res["df"]=df
+    return  res
