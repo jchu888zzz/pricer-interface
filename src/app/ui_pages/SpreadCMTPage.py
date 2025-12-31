@@ -52,7 +52,7 @@ class Ui_SpreadCMTPage(QWidget):
         self.form_autocall.submitted.connect(lambda d: self._on_submitted(d, "Autocall"))
         self.form_digit.submitted.connect(lambda d: self._on_submitted(d, "Digit"))
         self.form_range.submitted.connect(lambda d: self._on_submitted(d, "RangeAccrual"))
-        self.form_range.submitted.connect(lambda d: self._on_submitted(d, "TARN"))
+        self.form_range.submitted.connect(lambda d: self._on_submitted(d, "Tarn"))
 
     def _on_submitted(self, input_data: dict, source_tab: str):
         # add source metadata and re-emit
