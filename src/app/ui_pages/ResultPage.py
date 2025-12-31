@@ -5,7 +5,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 import json
 
-
 from Pricing.Utilities import Display,Dates
 
 class Ui_ResultPageRate(QWidget):
@@ -94,8 +93,8 @@ class Ui_ResultPageRate(QWidget):
     
     def _format_data(self,data:dict) -> dict:
         res=dict()
-        if 'Price' in data.keys():
-            res['Price']=Display.format_to_percent(data['Price'])
+        if 'price' in data.keys():
+            res['price']=Display.format_to_percent(data['price'])
         if 'coupon' in data.keys():
             res['coupon']=Display.format_to_percent(data['coupon'])
         
@@ -105,8 +104,16 @@ class Ui_ResultPageRate(QWidget):
         dic_table=data["table"]
         res["table"]=dict()
         res["table"]["Payment Dates"]=[Display.format_ql_date(x,format="%d/%m/%Y") 
-                                       for x in dic_table["Payment Dates"]]
-        for key in ["Model Forward","Early Redemption Proba","Zero Coupon"]:
+                                        for x in dic_table["Payment Dates"]]
+        if "Model Forward" in dic_table.keys():
+            if all(dic_table["Model Forward"] <=1):
+                res["table"]["Model Forward"]=[Display.format_to_percent(x) 
+                                            for x in dic_table["Model Forward"]]
+            else:
+                res["table"]["Model Forward"]=[str(Display.truncate(x,2)) 
+                                            for x in dic_table["Model Forward"]]
+        
+        for key in ["Early Redemption Proba","Zero Coupon"]:
             if key in dic_table.keys():
                 res["table"][key]=[Display.format_to_percent(x) for x in dic_table[key]]
 
