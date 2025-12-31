@@ -1,7 +1,7 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTabWidget
 
-from .Forms.SingleRate import Ui_Autocall,Ui_Digit,Ui_RangeAccrual,Ui_Tarn,Ui_FixedRate
+from .Forms.SingleRate import Ui_Autocall,Ui_Digit,Ui_RangeAccrual,Ui_Tarn,Ui_FixedRate,Ui_MinMax
 
 dic_currency={'EUR':['EUR CMS ' + str(i) +'Y' for i in [5,10,15,20,25,30]]+ ['EUR Euribor ' +x for x in ['3M','12M']],
                 'USD':['USD CMS ' + str(i) +'Y' for i in [5,10,15,20,25,30]]}
@@ -48,7 +48,11 @@ class Ui_RatePage(QWidget):
         self.form_fixedrate = Ui_FixedRate(dic_currency)
         self.form_fixedrate.setObjectName("tab_fixedrate")
         self.Ratetabs.addTab(self.form_fixedrate, "FixedRate")
-
+        
+        #Tab 6 -MinMax
+        self.form_minmax = Ui_MinMax(dic_currency)
+        self.form_minmax.setObjectName("tab_minmax")
+        self.Ratetabs.addTab(self.form_minmax, "MinMax")
 
         layout.addWidget(self.Ratetabs)
 
@@ -59,6 +63,7 @@ class Ui_RatePage(QWidget):
         self.form_range.submitted.connect(lambda d: self._on_submitted(d, "RangeAccrual"))
         self.form_tarn.submitted.connect(lambda d: self._on_submitted(d, "Tarn"))
         self.form_fixedrate.submitted.connect(lambda d: self._on_submitted(d, "FixedRate"))
+        self.form_minmax.submitted.connect(lambda d: self._on_submitted(d, "MinMax"))
 
     def _on_submitted(self, input_data: dict, source_tab: str):
         # add source metadata and re-emit
