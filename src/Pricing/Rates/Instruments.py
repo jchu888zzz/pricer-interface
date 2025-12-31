@@ -4,6 +4,7 @@ from scipy.stats import norm
 import pandas as pd
 
 from Pricing.Utilities.Display import truncate
+from Pricing.Curves.Classic import Curve
 
 class CMSSpreadOption:
     
@@ -19,22 +20,18 @@ class CMSSpreadOption:
 
 class Swaption:
 
-    def __init__(self,parameters:tuple,Curve,calc_date:ql.Date):
-        self.vol,self.Expiry,self.Term=parameters[0],parameters[1],parameters[2] #Vol quote en  %
+    def __init__(self,parameters:tuple):
+        self.vol,self.expiry,self.tenor=parameters[0],parameters[1],parameters[2] #Vol quote en  %
         self.typequote=parameters[3]
-        self.frequency=ql.Period(parameters[4])
-        self.timegrid=self.get_timegrid(calc_date)
-        self.t=ql.Thirty360(ql.Thirty360.BondBasis).yearFraction(calc_date,calc_date+ql.Period(self.Expiry))
-        self.T=ql.Thirty360(ql.Thirty360.BondBasis).yearFraction(calc_date,calc_date+ql.Period(self.Term))
-        self.Forward_Swap_rate=Curve.Forward_Swap_rate
-        self.ZC,self.delta=Curve.Discount_Factor(self.timegrid),np.array([x-y for x,y in zip(self.timegrid[1:],self.timegrid)])
-        self.striketype=parameters[5]
-        self.K=self.get_strike(parameters[5],parameters[6])
-        self.price=self.price_mkt()
-    
+        self.float_freq=parameters[4]
+        self.fix_freq=parameters[5]
+        self.strike_type=parameters[6]
+        if self.strike_type=='from_ATM':
+            self.strike_shift=parameters[7]
+        
     def __repr__(self):
-        return f'Swaption (Expiry:{self.Expiry},T:{self.T},Strike:{truncate(self.K,3)},quote:{self.vol},price:{truncate(self.price,2)})'
-
+        return f'Swaption (Expiry:{self.expiry},Tenor:{self.tenor},striketype:{self.strike_type + self.strike_shift},quote:{self.vol})'
+    
     def get_strike(self,striketype,shift):
         LVL=np.sum(self.ZC[1:]*self.delta)
         ATM=(self.ZC[0]-self.ZC[-1])/LVL
@@ -54,13 +51,26 @@ class Swaption:
         
         return np.array(delta)
     
-    def price_mkt(self):
+    
+    def price_mkt(self,calc_date:ql.Date,curve:Curve,calendar=ql.Thirty360(ql.Thirty360.BondBasis)):
         
-        f=self.Forward_Swap_rate(self.t,self.T)
-        vol_=self.vol*np.sqrt(self.t)
+        start_date=calc_date + ql.Period(self.Expiry)
+        end_date=start_date + ql.Period(self.Term)
+        schedule=list(ql.MakeSchedule(start_date,end_date,ql.Period(self.frequency)))
+        #Compute strike
+        K=curve.forward_swap_rate(self,[start_date],self.tenor,
+                            self.fix_freq,self.float_freq)
+        
+        if self.strike_type=='from_ATM':
+            K+=float(self.strike_shift)
+        
+        fwd=curve.forward_swap_rate([start_date],self.tenor)
+        
+        t=calendar.yearFraction(calc_date,start_date)
+        vol_=self.vol*np.sqrt(t)
         
         if (self.typequote== 'normal_vol'):
-            k=(f-self.K)/vol_    
+            k=(fwd-self.K)/vol_    
             res=np.sum(self.ZC[1:]*self.delta)*vol_*(np.exp(-0.5*k**2)/np.sqrt(2*np.pi)  + k*norm.cdf(k))*10000
         else:
             d1,d2=0.5*vol_,-0.5*vol_            
@@ -173,7 +183,8 @@ class Straddle:
 def get_swaptions(df:pd.DataFrame,Curve,calc_date:ql.Date,currency:str) -> tuple[Swaption]:
     
     mask=df.Description.str.contains(currency and 'Swaption')
-    dic_freq={'USD':'3M','EUR':'6M'}
+    dic_freq={'USD':{'fix_freq':'6M','float_leg':'3M'},
+                'EUR':{'fix_freq':'1Y','float_leg':'6M'}}
 
     def convert_element(x):
         name,quote=x[0].split(),x[1]
@@ -191,7 +202,8 @@ def get_swaptions(df:pd.DataFrame,Curve,calc_date:ql.Date,currency:str) -> tuple
             type_quote='normal_vol'
         else :
             type_quote='vol'
-        param=(quote,expiry,maturity,type_quote,dic_freq[currency],striketype,strike_shift)
+        param=(quote,expiry,maturity,type_quote,dic_freq[currency]['fix_freq'],
+                dic_freq[currency]['float_freq'],striketype,strike_shift)
 
         return Swaption(param,Curve,calc_date)
     

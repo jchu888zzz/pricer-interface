@@ -15,7 +15,7 @@ import Pricing.Utilities.Functions as Functions
 from Pricing.Curves import Classic
 
 
-def get_model(dic_df:dict,currency:str,calc_date) -> dict:
+def get_model(calc_date:ql.Date,dic_df:dict,currency:str) -> dict:
     calc_date=ql.Date.todaysDate()
     curve,risky_curve=Classic.get_curves(calc_date,dic_df,currency)
 
@@ -36,11 +36,11 @@ def Put(vol:float,K:float,ZC1:float,ZC2:float)-> float:
     return K*ZC1*norm.cdf(d1) - ZC2*norm.cdf(d2)
 
 @timer
-def Calibration(Curve,instru_calib:list[Rate_Instruments.Swaption | Rate_Instruments.Cap]):
+def Calibration(curve,instru_calib:list[Rate_Instruments.Swaption | Rate_Instruments.Cap]):
     Caps=[x for x in instru_calib if isinstance(x,Rate_Instruments.Cap)]
     Swaptions=[x for x in instru_calib if isinstance(x,Rate_Instruments.Swaption) ]
     def error_function(param:tuple[float]):
-        model=HW(Curve,param)
+        model=HW(curve,param)
         res=[]
         for item in Swaptions:
             res.append((item.price-model.Swaption_price(item))/1e4)
@@ -51,29 +51,28 @@ def Calibration(Curve,instru_calib:list[Rate_Instruments.Swaption | Rate_Instrum
 
     optimizer=least_squares(error_function,x0=(0.02,0.02),bounds=([1e-5,1e-3],[0.5,np.sqrt(0.1)]))
 
-    return HW(Curve,optimizer.x)
+    return HW(curve,optimizer.x)
 
 
-def select_rates(rates:np.ndarray,grid_simu:list,tgrid:list,depth=1):
-    if depth==1:
-        idx=[Functions.find_idx(grid_simu,t) for t in tgrid]
+def select_rates(rates:np.ndarray,simu_dates:list[ql.Date],fix_dates:list[ql.Date],
+                sub_frequency:None| str) -> np.ndarray:
+    if not sub_frequency:
+        idx=Functions.find_idx(simu_dates,fix_dates)
         return rates[:,idx].T
     else:
-        tgrid1=np.insert(tgrid,0,0)
-        res=np.zeros((len(tgrid),depth,rates.shape[0]))
-        for i,(t1,t2) in enumerate(zip(tgrid1,tgrid1[1:])):
-            subgrid=np.linspace(t1,t2,depth)
-            sub_idx=[Functions.find_idx(grid_simu,t) for t in subgrid]
+        res=[]
+        for i,(d1,d2) in enumerate(zip(fix_dates,fix_dates[1:])):
+            sub_schedule=ql.MakeSchedule(d1,d2,ql.Period(sub_frequency))
+            sub_idx=Functions.find_idx(simu_dates,sub_schedule)
             res[i]=(rates[:,sub_idx].T)
         return res
 
 class HW :
     
-    def __init__(self,Curve,param_=(0.02,0.02)):
+    def __init__(self,curve,param_=(0.02,0.02)):
         #Forward and DF are interpolation function
-        self.Curve=Curve
-        self.spot=Curve.spot
-        self.DF=CubicSpline(Curve.timegrid,Curve.value)
+        self.curve=curve
+        self.DF=CubicSpline(curve.tgrid,curve.value)
         self.a,self.sigma=param_[0],param_[1]
         
     def __repr__(self):
@@ -101,14 +100,15 @@ class HW :
         A= self.DF(T)/self.DF(t)*np.exp(B*forward - 0.5*(B**2)*self.sigma**2*self.B_term(t,factor=2))
         return (A,B)
     
-    def compute_discount_factor_from_rates(self,rate:list,t:float,T:Union[np.ndarray,float])->np.ndarray:
+    def compute_discount_factor_from_rates(self,rate:np.ndarray,t:float,T:Union[np.ndarray,float])->np.ndarray:
         A,B=self.affine_term(t,T)
-        return np.array([A*np.exp(-r*B) for r in rate])
+        rate_reshaped=rate.reshape(-1,1) if rate.ndim==1 else rate
+        return A*np.exp(-rate_reshaped*B)
     
     def var_(self,t:Union[np.ndarray,float]) -> Union[np.ndarray,float]:
-         if self.a==0:
+        if self.a==0:
             return 0.5*self.sigma**2*t
-         else:
+        else:
             return 0.5*self.sigma**2*(1-np.exp(-2*self.a*t))/self.a
         
     def alpha_T(self,t:float,T:float) ->float:
@@ -143,7 +143,6 @@ class HW :
         X=A_*np.exp(-B_*r_star)
 
         vol_=B_*self.sigma*np.sqrt(self.B_term(item.timegrid[0],factor=2))
-                 
         return np.sum(c*Put(vol_,X,item.ZC[0],item.ZC[1:]))*10**4
 
     def get_CMS_adjustment(self,Curve,calc_date:ql.Date,Instruments:list):
@@ -154,54 +153,26 @@ class HW :
         
         alpha,Var=[self.alpha_T(t,T) for t in grid ],[self.var_(t) for t in grid]
         res=np.zeros((Nb_simu,len(grid)))
-        # initial_t=0.25
-        # curve=self.Curve
-        # res[:,0]=curve.L(0,initial_t)
-        initial_t=T/4
+        initial_t=0.25
         res[:,0]=-(np.log(self.DF(initial_t))-np.log(self.DF(0)))/initial_t
         for i in range(1,len(grid)):
             h=grid[i]-grid[i-1]
 
             res[:,i]=( res[:,i-1]*np.exp(-self.a*h) + alpha[i] - alpha[i-1]*np.exp(-self.a*h) 
-                      + np.sqrt(Var[i]-Var[i-1]*np.exp(-2*self.a*h))*rng.standard_normal(size=Nb_simu) )
+                        + np.sqrt(Var[i]-Var[i-1]*np.exp(-2*self.a*h))*rng.standard_normal(size=Nb_simu) )
         
         return res
     
     def generate_rates(self,calc_date:ql.Date,maturity_date:ql.Date,
-                       cal=ql.Thirty360(ql.Thirty360.BondBasis),
-                       Nbsimu=10000,seed=123) -> dict:
-        #seed=int(sum(Contract.fixgrid))
+                        cal=ql.Business252(),
+                        Nbsimu=10000,seed=42) -> dict:
         rng=np.random.default_rng(int(seed))
         T=cal.yearFraction(calc_date,maturity_date)
         schedule=compute_target_schedule(calc_date,maturity_date,ql.Period('1D'))
         grid=np.array([cal.yearFraction(calc_date,x) for x in schedule[1:] ])
-        
         rates=self.rate_simulation(T,grid,Nbsimu,rng)
 
-        return {'rates':rates,'schedule':schedule,'grid':grid}
-
-    # def rate_simulation(self,T:float,grid:list,Nb_simu:int,rng:np.random._generator.Generator):
-        
-    #     def func_alpha(t):
-    #         return self.instantaneous_f(t) + 0.5*(self.sigma/self.a)**2*(1-np.exp(-self.a*t))**2
-        
-    #     def func_M(s,t):
-    #         return (self.sigma/self.a)**2*((1-np.exp(-self.a*(t-s))) - 0.5*np.exp(-self.a*T)*(np.exp(self.a*t)-np.exp(-self.a*(t-2*s))))
-
-    #     alpha=[func_alpha(t) for t in grid ]
-    #     M_=[func_M(0,grid[0])]+[func_M(s,t) for s,t in zip(grid,grid[1:])]
-    #     Var=[self.var_(t) for t in grid]
-    #     Res=np.zeros((Nb_simu,len(grid)))
-    #     h=1e-3
-    #     Res[:,0]=-(np.log(self.DF(h))-np.log(self.DF(0)))/h
-    #     X=np.zeros((Nb_simu,len(grid)))
-    #     for i in range(1,len(grid)):
-    #         h=grid[i]-grid[i-1]
-    #         #print(-M_[i]+M_[i-1]*np.exp(-self.a*h))
-    #         X[:,i]=X[:,i-1]*np.exp(-self.a*h) - M_[i-1] + np.sqrt(Var[i]-Var[i-1]*np.exp(-2*self.a*h))*rng.standard_normal(size=Nb_simu) 
-    #         Res[:,i]=X[:,i] + alpha[i] 
-
-    #     return Res
+        return {'rates':rates,'schedule':schedule}
     
     def compute_deposit_from_rates(self,rates:np.ndarray,t:float,DepositTerm:str) -> np.ndarray:
         h=convert_period(DepositTerm)
@@ -213,9 +184,12 @@ class HW :
         T=convert_period(Term)
         grid=t+np.arange(0,T,h)
         P=self.compute_discount_factor_from_rates(rates,t,grid)
-        res=np.array([(x[0]-x[-1])/np.sum(x[1:]) for x in P]) 
-        
+        res=(P[:,0]-P[:,-1])/np.sum(P[:,1:],axis=1)
         return res
+    
+    #wrapper to select rates
+    def select_rates(self,data_rates:dict,grid:list) -> np.ndarray:
+        return select_rates(data_rates['rates'],data_rates['grid'],grid,1)
     
     def compute_single_undl_from_rates(self,data_rates:dict,fixgrid:list,undl1:str,include_rates=True) ->tuple[np.ndarray]:
         """ result shape (len(fixgrid),nb simu)"""
@@ -229,12 +203,12 @@ class HW :
         else:
             raise ValueError(f"{rate_type1} not implemented")
         if not include_rates:
-            return {'undl':undl}
+            return {'undl':undl,'nbsimu':rates.shape[1]}
         else:
-            return {'undl':undl,'rates':rates}
+            return {'undl':undl,'nbsimu':rates.shape[1],'rates':rates}
     
     def compute_single_undl_from_rates_with_depth(self,data_rates:dict,fixgrid:list,undl1:str,fixing_depth:int,
-                                                  include_rates=True)->np.ndarray:
+                                                    include_rates=True)->np.ndarray:
         """ result shape (len(fixgrid),fixing_depth,nb simu)"""
         cur1,rate_type1,tenor1=undl1.split()
         rates=select_rates(data_rates['rates'],data_rates['grid'],fixgrid,fixing_depth)
@@ -245,54 +219,21 @@ class HW :
             sub_fixgrid=np.linspace(t,tgrid[i+1],fixing_depth) # nbweeks 52
             if rate_type1=="CMS":
                 res[i]=np.array([ self.compute_cms_from_rates(rates[i][j],sub_fixgrid[j],tenor1) 
-                             for j in range(len(sub_fixgrid))])
+                                for j in range(len(sub_fixgrid))])
             elif rate_type1=="Euribor":
                 res[i]=np.array([ self.compute_deposit_from_rates(rates[i][j],sub_fixgrid[j],tenor1) 
-                             for j in range(len(sub_fixgrid))])
+                                for j in range(len(sub_fixgrid))])
         
         if not include_rates:
-            return {'undl':res}
+            return {'undl':res,'nbsimu':rates.shape[1]}
         else:
-            return {'undl':res,'rates':rates[:,-1,:]}
+            return {'undl':res,'nbsimu':rates.shape[1],'rates':rates[:,-1,:]}
     
-    def compute_fix_rate_basis_func_from_rates(self,data_rates:dict,
-                                               fixgrid:list[ql.Date],paygrid:list[ql.Date],
-                                               call_idxs:list[ql.Date],
-                                               deg=3,max_correlation=0.85,
-                                               include_rates=True) ->tuple[np.ndarray]:
-        """ result shape (len(fixgrid),nb simu)"""
-        rates=select_rates(data_rates['rates'],data_rates['grid'],fixgrid,1)
-        undl=[None]*len(call_idxs)
-        for i,idx in enumerate(call_idxs):
-            swapgrid=np.arange(fixgrid[idx],paygrid[-1],0.5)
-            delta=np.array([x-y for x,y in zip(swapgrid[1:],swapgrid)])
-            Pt_T=self.compute_discount_factor_from_rates(rates[idx],fixgrid[idx],swapgrid)
-            swap_values=np.array([(P[0]-P[-1])/np.sum(delta*P[1:]) for P in Pt_T ])
-            undl[i]=swap_values.copy()
-            # for j in range(2,deg+1):
-            #     undl[i]=np.c_[undl[i],swap_values**j]
-            # stop_grid=np.array([paygrid[j] for j in call_idxs[i+1:]+[len(paygrid)-1]])
-            # bond_values=self.compute_discount_factor_from_rates(rates[i],fixgrid[i],stop_grid)  
-            # bond_values=self.compute_discount_factor_from_rates(rates[i],fixgrid[i],paygrid[idx+1:])
-            # temp=[]
-            # for b in bond_values.T :
-            #     if abs(pearsonr(b,swap_values).statistic) <=max_correlation:
-            #         temp.append(b)
-            # if temp:        
-            #     undl[i]=np.c_[np.array(temp).T,undl[i]] 
-
-            undl[i]=(undl[i] - np.mean(undl[i],axis=0))/np.std(undl[i],axis=0)
-
-        if not include_rates:
-            return {'undl':undl}
-        else:
-            return {'undl':undl,'rates':rates}
-        
     def compute_swaption_from_rates(self,data_rates:dict,
-                                               fixgrid:list[ql.Date],paygrid:list[ql.Date],
-                                               call_idxs:list[ql.Date],K:float,
+                                                fixgrid:list[ql.Date],paygrid:list[ql.Date],
+                                                call_idxs:list[ql.Date],K:float,
                                                 side='sell',
-                                               include_rates=True) ->tuple[np.ndarray]:
+                                                include_rates=True) ->tuple[np.ndarray]:
         """ result shape (len(fixgrid),nb simu)"""
         
         if side=='buy':
@@ -319,17 +260,19 @@ class HW :
             return undl
         
     def compute_prep_for_swaption_from_rates(self,data_rates:dict,
-                                               fixgrid:list[float],T:float,
-                                               call_idxs:list[int],
-                                               include_rates=True) ->tuple[np.ndarray]:
+                                                fixgrid:list[float],T:float,
+                                                callgrid:list[float],
+                                                include_rates=True) ->tuple[np.ndarray]:
         """ result shape (len(fixgrid),nb simu)"""
 
         rates=select_rates(data_rates['rates'],data_rates['grid'],fixgrid,1)
-        res_delta=[None]*len(call_idxs)
-        res_Pt_T=[None]*len(call_idxs)
-        res_swap=[None]*len(call_idxs)
-        res_DF=[None]*len(call_idxs)
-        for i,idx in enumerate(call_idxs):
+        res_delta=[None]*len(callgrid)
+        res_Pt_T=[None]*len(callgrid)
+        res_swap=[None]*len(callgrid)
+        res_DF=[None]*len(callgrid)
+        for i,t in enumerate(callgrid):
+            idx=Functions.find_idx(fixgrid,t)
+            
             swapgrid=np.arange(fixgrid[idx],T+1,0.5)
             delta=np.array([x-y for x,y in zip(swapgrid[1:],swapgrid)])
             Pt_T=self.compute_discount_factor_from_rates(rates[idx],fixgrid[idx],swapgrid)
@@ -342,9 +285,10 @@ class HW :
             #undl[i]=(undl[i] - np.mean(undl[i],axis=0))/np.std(undl[i],axis=0)
 
         dic_arg={"swap":res_swap,
-                 "Pt_T":res_Pt_T,
-                 "delta":res_delta,
-                 "DF":res_DF}
+                "Pt_T":res_Pt_T,
+                "delta":res_delta,
+                "DF":res_DF,
+                'nbsimu':rates.shape[1]}
 
         if not include_rates:
             return dic_arg
