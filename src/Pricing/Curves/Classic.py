@@ -1,21 +1,18 @@
+import pandas as pd
+import QuantLib as ql
 import numpy as np
 from bisect import bisect
-import QuantLib as ql
+
 from scipy.optimize import brentq
 from scipy.interpolate import CubicSpline
-
-from Pricing.Curves import Instruments
-from Pricing.Utilities import Data_File
+from Pricing.Utilities import InputConverter
 from Pricing.Credit.Model import Intensity 
 import Pricing.Credit.Instruments as Credit_instruments
 
 
 def get_curves(calc_date:ql.Date,dic_df:dict,currency:str):
-    mask=Data_File.select_row_from_keywords(dic_df['curve'],'Description',
-                                                keywords=(currency,))
-    items=Instruments.get_instruments(dic_df['curve'][mask],calc_date,
-                                                  currency,'3M')
-    curve=Curve(items,currency)
+    instruments=sort_and_select_instruments(calc_date,dic_df['curve'],currency,'3M')
+    curve=Curve(calc_date,currency,instruments)
     issuer='CIC_'+currency
     entity=Credit_instruments.retrieve_credit_single_from_dataframe(dic_df['issuer'],issuer,calc_date)
     model_credit=Intensity.Calibration(curve,entity)
@@ -23,171 +20,290 @@ def get_curves(calc_date:ql.Date,dic_df:dict,currency:str):
     return curve,risky_curve
 
 
-def interval_integral(previous_r:float,r:float,times:tuple,t:float,eps=0.1) -> float:
-    h=times[1]-times[0]
-    delta=t-times[0]   
-    if t<= times[0]+ eps*h:    
-        res=delta*previous_r + (r-previous_r)*0.5*delta**2/(eps*h)
+_DIC_DEPOSIT={'O_N':'1D','T_N':'2D','S_N':'3D','1M':'1M','2M':'2M','3M':'3M',
+                '6M':'6M','9M':'9M','12M':'12M'}
+class Deposit:
+    def __init__(self,period:str,quote:float):
+        self.period=period
+        self.quote=quote
+    
+    def __repr__(self):
+        return f'Deposit (Period:{self.period},quote:{self.quote})'
+    
+    def convert_period(self):
+        return _DIC_DEPOSIT[self.period]
+
+
+_DIC_MONTHS={'JAN':1,'FEB':2,'MAR':3,'APR':4,'MAY':5,'JUN':6,'JUL':7,'AUG':8,'SEP':9,'OCT':10,'NOV':11,'DEC':12}
+class Future:
+    def __init__(self,month:str,year:int,quote:float):
+        self.month=month
+        self.year=year
+        self.quote=quote
+
+    def __repr__(self):
+        return f'Futures (Delivery:{self.month+str(self.year)},quote:{self.quote})'
+    
+    def get_start_date(self):
+        """ Starts at third wednesday"""
+        month=_DIC_MONTHS[self.month]
+        res=ql.Date(15,month,self.year)
+        if res.weekday()!=4:
+            day= 15 + (4-res.weekday())%7
+            return ql.Date(day,month,self.year)
+        else:
+            return res
+
+_DIC_FREQ_SWAP={"EUR":{'Overnight':('1Y','1Y'),'1M':('1Y','1M'),'3M':('1Y','3M'),
+                        '6M':('1Y','6M'),'Classical':('1Y','6M')},
+                "USD":{'Overnight':('1Y','1Y'),'1M':('3M','3M'),'3M':('6M','3M'),
+                        '6M':('6M','6M'), 'Classical':('1Y','6M')}}
+class Swap:
+    def __init__(self,period:str,quote:float,fix_freq:str,float_freq:str):
+        
+        self.period=period
+        self.quote=quote
+        self.fix_freq,self.float_freq=fix_freq,float_freq
+    
+    def __repr__(self):
+        return f'Swap (Period:{self.period},quote:{self.quote})'
+
+_PATTERNS={'Overnight': {'deposit':'Deposit', 'swap':r'^(?=.*Basis_swap)(?=.*V_Overnight)'},
+    '3M': {'deposit':r'^(?=.*Deposit)(?=.*3M)', 'future':r'^(?=.*futures)(?=.*3M)', 'swap':r'^(?=.*Basis_swap)(?=.*V_3M)'},
+    'Classical': {'deposit':'Deposit', 'future':r'^(?=.*futures)(?=.*3M)', 'swap':'Swap'},
+    '6M': {'deposit':r'^(?=.*Deposit)(?=.*6M)', 'swap':r'^(?=.*Basis_swap)(?=.*V_6M)'},
+    '1M': {'deposit':r'^(?=.*Deposit)(?=.*1M)', 'swap':r'^(?=.*Basis_swap)(?=.*V_1M)'}}
+
+
+_BUSINESS_CALENDAR=ql.TARGET()
+_CRITERION={'EUR': (ql.Period("9M"),ql.Period("23M")),
+                    'USD':(ql.Period("5M"),ql.Period("12M")),
+                    'GBP':(ql.Period("9M"),ql.Period("20M")),
+                    'CHF':(ql.Period("9M"),ql.Period("18M")) }
+
+def sort_and_select_instruments(calc_date:ql.Date,df:pd.DataFrame,cur_name:str,option='3M') -> list  :
+    """Retrieve Curve Instruments from a formatted dataframe
+        Returns: list of Instruments  Deposits/Future/Swaps """
+
+    def make_deposit(item):
+        name=item[0].split()
+        res=Deposit(period=name[-1],quote=item[1])
+        period=res.convert_period()
+        res.maturity_date=_BUSINESS_CALENDAR.advance(calc_date,ql.Period(period),ql.ModifiedFollowing)
+        return res
+
+    fix_freq,float_freq=_DIC_FREQ_SWAP[cur_name][option]    
+    def make_swap(item):
+        if '@' in item[0]:
+            name=item[0].split('@')[0].split()
+        else:
+            name=item[0].split()
+        res=Swap(period=name[-1],quote=item[1],fix_freq=fix_freq,float_freq=float_freq)
+        res.maturity_date=_BUSINESS_CALENDAR.advance(calc_date+ql.Period("2D"),ql.Period(res.period),
+                                            ql.ModifiedFollowing)
+        res.fix_schedule=list(ql.MakeSchedule(calc_date+ql.Period("2D"),
+                                            res.maturity_date,ql.Period(fix_freq)))[1:]
+        res.float_schedule=list(ql.MakeSchedule(calc_date+ql.Period("2D"),
+                                                res.maturity_date,ql.Period(float_freq)))[1:]
+        return res
+
+    def make_future(item):
+        name=item[0].split()
+        if '@' in item[0]:
+            month,year=name[-3],int(name[-2])
+        else:
+            month,year=name[-2],int(name[-1])
+        res=Future(month=month,year=year,quote=item[1])
+        res.start_date=res.get_start_date()
+        res.maturity_date=_BUSINESS_CALENDAR.advance(res.start_date,ql.Period("3M"),ql.ModifiedFollowing)
+        return res
+    
+    patterns=_PATTERNS.get(option,{})
+    res=[]
+    df=df[df.Description.str.contains(cur_name)]
+    if 'deposit' in patterns:
+        mask_deposit=df.Description.str.contains(patterns['deposit'])
+        deposit_items=list(map(make_deposit,df[mask_deposit].to_numpy()))
+        deposit_items=[x for x in deposit_items if x.maturity_date <= calc_date+_CRITERION[cur_name][0]]
+        if deposit_items:
+            res.extend(deposit_items)
+
+    if 'future' in patterns:
+        mask_future=df.Description.str.contains(patterns['future'])
+        future_items=list(map(make_future,df[mask_future].to_numpy()))
+        future_items=[x for x in future_items if (calc_date+_CRITERION[cur_name][0] < x.maturity_date 
+                                                    < calc_date+_CRITERION[cur_name][1])]
+        if future_items:
+            res.extend(future_items)
+    if 'swap' in patterns:
+        mask_swap=df.Description.str.contains(patterns['swap'])
+        swap_items=list(map(make_swap,df[mask_swap].to_numpy()))
+        swap_items=[x for x in swap_items if calc_date+_CRITERION[cur_name][1] < x.maturity_date ]
+        if swap_items:
+            res.extend(swap_items)
+
+    return sorted(res,key=lambda x: x.maturity_date)
+
+#To_vectorize
+def interval_integral(previous_r:float,r:float,t1:float,t:float,t2:float,eps=0.1) -> float:
+    h=t2-t1
+    t_delta=t-t1   
+    r_delta=r-previous_r
+    if t<= t1+ eps*h:    
+        res=t_delta*previous_r + r_delta*0.5*t_delta**2/(eps*h)
     else:
-        res= eps*(h*previous_r + h*0.5*(r-previous_r)) + r*(1-eps)*(t-(times[0]+eps*h))
+        res= eps*(h*previous_r + h*0.5*r_delta) + r*(1-eps)*(t-(t1+eps*h))
     
     return res
-        
-def get_grid(T:float,delta:float) -> np.ndarray:
-    if T > delta:
-        grid=np.arange(delta,T,delta)
-    else:
-        grid=np.array([delta,T])
-        
-    return grid
 
 def find_first_zero(a) -> int:
     if 0 not in a:
         raise ValueError("No Zero")
-    
     for i,x in enumerate(a):
         if x==0:
             return i
 
 class Curve:
-    """ Take Deposit_Instrument,Future_Instrument,Swap_Instrument to build Curve
+    """ Take Deposit,Future,Swap to build Curve
     """
-    def __init__(self,Instruments:list,cur_name:str):
+    def __init__(self,calc_date:ql.Date,cur_name:str,instruments:list):
         
         self.cur_name=cur_name
+        self.calc_date=calc_date
         #spot
-        self.spot=Instruments[0].quote
-        self.calibrate(Instruments)
+        #self.spot=Instruments[0].quote
+        self.calendar=ql.Actual360()
+        self.calibrate(instruments)
     
-    def from_Deposit(self,value:float,item:Instruments.Deposit)->float:
-        """Retrieve rate from Deposit quote"""
-        return (1-value)/(item.T*value)
+    def convert_dates_to_tgrid(self,dates:list[ql.Date]):
+        return [self.calendar.yearFraction(self.calc_date,d) for d in dates]
     
-    def from_Futures(self,value:float,delta:float) -> float:
-        """Retrieve rate from Future quote"""
-        return 100*(1+np.log(value)/delta)
-        
-    def from_Swap(self,r:float,item:Instruments.Swap) -> float:
-        """Retrieve rate from Swap quote"""
-        dic_freq={'1M':1/12,'3M':0.25,'6M':0.5,'1Y':1}
-        
-        last_idx=find_first_zero(self.rates[1:])
-        t_last=self.timegrid[last_idx]
-        
-        h_float=dic_freq[item.float_delta]
-        float_grid=get_grid(item.T,h_float)
-        float_increment=interval_integral(self.rates[last_idx],r,(t_last,float_grid[-1]),float_grid[-1])
-        float_DF=self.Discount_Factor(t_last)*np.exp(-float_increment)        
-        
-        h_fix=dic_freq[item.fix_delta]
-        fix_grid=get_grid(item.T,h_fix)
-        fix_prev_DF=np.array([ self.Discount_Factor(t) for t in fix_grid if t <= t_last])
-        fix_increments=np.array([interval_integral(self.rates[last_idx],r,(t_last,t),t) for t in fix_grid if t> t_last])
-
-        fix_DF= np.concatenate( (fix_prev_DF,self.Discount_Factor(t_last)*np.exp(-fix_increments)) )        
-        LVL=h_fix*sum(fix_DF)
-        
-        return (1-float_DF)/LVL
-    
+    #To_vectorize
     def parametric_form(self,t:float) ->float:
         
-        idx=bisect(self.timegrid,t)
-        if idx>len(self.timegrid)-1:
+        idx=bisect(self.tgrid,t)
+        if idx>len(self.tgrid)-1:
             idx=-1
-        t1,t2=self.timegrid[idx-1],self.timegrid[idx]
-        last_integral=interval_integral(self.rates[idx-1],self.rates[idx],(t1,t2),t)
+        t1,t2=self.tgrid[idx-1],self.tgrid[idx]
+        last_integral=interval_integral(self.rates[idx-1],self.rates[idx],t1,t,t2)
 
         return self.value[idx-1]*np.exp(-last_integral)
     
-    def Discount_Factor(self,t_arg):
-                
-        return self.interpolate(t_arg)
+    def calibrate(self,instruments:list):
         
-    def Forward(self,t_start:float,T:float,S:float)->float:
-        """ Forward value of the rate between T and S starting at time t_start"""
-        Pt_T=self.Discount_Factor(T)/self.Discount_Factor(t_start)
-        Pt_S=self.Discount_Factor(S)/self.Discount_Factor(t_start)
-    
-        return (Pt_T/Pt_S-1)/(S-T) 
-
-    def L(self,t:float,T:float) -> float:
-        """ LIBOR """
-        Pt_T=self.Discount_Factor(T)/self.Discount_Factor(t)
-        delta=T-t
-    
-        return (1-Pt_T)/(delta*Pt_T)
-
-    def Forward_Swap_rate(self,t:float,T:float,h_fix=1,h_float=0.5) -> float:
-        """ Forward value of the swap of Term T starting at time t"""
-        fix_grid=t+np.arange(0,T+h_fix,h_fix)
-        P_fix=self.Discount_Factor(fix_grid[1:])/self.Discount_Factor(t)
-        LVL=sum(P_fix)*h_fix
-
-        float_grid=t+np.arange(0,T+h_float,h_float)
-        P_float=self.Discount_Factor(float_grid)/self.Discount_Factor(t)
-
-        return (P_float[0]-P_float[-1])/LVL
+        def from_deposit(value:float,T:float)->float:
+            return (1-value)/(T*value)
         
-    def calibrate(self,items:list):
+        def from_futures(value:float,t:float,T:float):
+            return 100*(1+np.log(value)/(T-t))
         
-        self.timegrid=np.array([0]+[x.T for x in items])
+        def from_swap(r_prev:float,r:float,t_prev:float,
+                    fix_schedule:list[ql.Date],float_schedule:list[ql.Date]):
+            fix_grid=np.array([self.calendar.yearFraction(self.calc_date,x)
+                                for x in fix_schedule])
+            fix_prev_DF=np.array([ self.parametric_form(t) for t in fix_grid if t <= t_prev])
+            fix_increments=np.array([interval_integral(r_prev,r,t_prev,t,t) 
+                                        for t in fix_grid if t> t_prev])
+            fix_DF= np.concatenate( (fix_prev_DF,self.parametric_form(t_prev)*np.exp(-fix_increments)) )        
+
+            LVL=sum(fix_DF*np.array([fix_grid[0]]+ [x-y for x,y in zip(fix_grid[1:],fix_grid)]))
+            
+            float_grid=np.array([self.calendar.yearFraction(self.calc_date,x)
+                                for x in float_schedule])
+
+            float_increment=interval_integral(r_prev,r,t_prev,float_grid[-1],float_grid[-1])
+            float_DF=self.parametric_form(t_prev)*np.exp(-float_increment)     
+            return (1-float_DF)/LVL
         
-        self.rates=np.zeros(len(self.timegrid))
-        self.value=np.zeros(len(self.timegrid))
+        self.tgrid=np.array([0]+[self.calendar.yearFraction(self.calc_date,x.maturity_date)
+                                    for x in instruments])        
+        self.rates=np.zeros(len(self.tgrid))
+        self.value=np.zeros(len(self.tgrid))
         self.value[0]=1
-        for i,item in enumerate(items,1):
-            times=(self.timegrid[i-1],self.timegrid[i])
+        for i,item in enumerate(instruments,start=1):
+            t_prev=self.tgrid[i-1]
+            t=self.tgrid[i]
+            r_prev=self.rates[i-1]
 
-            if (type(item)==Instruments.Deposit):
-                ZC=lambda r : self.value[i-1]*np.exp(-interval_integral(self.rates[i-1],r,times,times[1]))
-                func=lambda r: self.from_Deposit(ZC(r),item) - item.quote
+            if isinstance(item,Deposit):
+                ZC=lambda r : self.value[i-1]*np.exp(-interval_integral(r_prev,r,t_prev,t,t))
+                func=lambda r: from_deposit(ZC(r),t) - item.quote
                 
-            elif (type(item)==Instruments.Future):
+            elif isinstance(item,Future):
+                t0=self.calendar.yearFraction(self.calc_date,item.start_date)
+                t1=self.calendar.yearFraction(self.calc_date,item.maturity_date)
+                increment=lambda r: np.exp(-interval_integral(r_prev,r,t0,t,t1))
+                func=lambda r: from_futures(increment(r),t0,t1) - item.quote
                 
-                delta=times[1]-times[0]
-                increment=lambda r: np.exp(-interval_integral(self.rates[i-1],r,times,times[1]))
-                func=lambda r: self.from_Futures(increment(r),delta) - item.quote
-                
-            elif (type(item)==Instruments.Swap) :
-                
-                if ql.Period(item.period)<=ql.Period('1Y'):
-                    ZC=lambda r : self.value[i-1]*np.exp(-interval_integral(self.rates[i-1],r,times,times[1]))
-                    func=lambda r: self.from_Deposit(ZC(r),item) - item.quote
+            elif isinstance(item,Swap) :
+                if ql.Period(item.period)<ql.Period('1Y'):
+                    ZC=lambda r : self.value[i-1]*np.exp(-interval_integral(r_prev,r,t_prev,t,t))
+                    func=lambda r: from_deposit(ZC(r),item) - item.quote
                 else:
-                    func=lambda r: self.from_Swap(r,item) -item.quote
+                    
+                    func=lambda r: from_swap(r_prev,r,t_prev,item.fix_schedule,
+                                            item.float_schedule) -item.quote
+            else:
+                raise ValueError(f'{item} instance not valid')
                 
-            elif (item.category=='Basis Swap') :
-
-                if ql.Period(item.period)<=ql.Period('1Y'):
-                    ZC=lambda r : self.value[i-1]*np.exp(-interval_integral(self.rates[i-1],r,times,times[1]))
-                    func=lambda r: self.from_Deposit(ZC(r),item) - item.quote
-                else:
-                    func=lambda r: self.from_Swap(r,item) -item.quote
                                 
-            self.rates[i]=brentq(func,-0.5,0.5,maxiter=100,xtol=1e-05)
-            self.value[i]=self.value[i-1]*np.exp(-interval_integral(self.rates[i-1],self.rates[i],times,times[1]))
-
-            self.interpolate=CubicSpline(self.timegrid,self.value)
-
+            r=brentq(func,-0.5,0.5,maxiter=100,xtol=1e-05)
+            self.value[i]=self.value[i-1]*np.exp(-interval_integral(r_prev,r,t_prev,t,t))
+            self.rates[i]=r
+            self.interpolate=CubicSpline(self.tgrid,self.value)
+            
+    def discount_factor(self,dates:list[ql.Date]):
+        tgrid=self.convert_dates_to_tgrid(dates)
+        return self.interpolate(tgrid)
+    
+    def forward_swap_rate(self,dates:list[ql.Date],tenor:str,
+                            fix_freq=ql.Period('1Y'),float_freq=ql.Period('6M')) -> float:
+        """ Forward value of the swap of Term T starting at time t"""
+        res=np.zeros(len(dates))
+        for i,d in enumerate(dates):
+            start=d+ql.Period('2D')
+            fix_schedule= list(ql.MakeSchedule(start,start+ql.Period(tenor),fix_freq))[1:]
+            fix_grid=np.array([self.calendar.yearFraction(self.calc_date,x)
+                                for x in fix_schedule])
+            P_fix=self.discount_factor(fix_schedule)
+            LVL=sum(P_fix*np.array([fix_grid[0]]+ [x-y for x,y in zip(fix_grid[1:],fix_grid)]))
+            
+            float_schedule= list(ql.MakeSchedule(start,start+ql.Period(tenor),float_freq))[1:]
+            P_float=self.discount_factor(float_schedule)
+            res[i]=(P_float[0]-P_float[-1])/LVL
+            
+        return (P_float[0]-P_float[-1])/LVL
+    
+    #To vectorize
+    def forward_cms(self,dates:list[ql.Date],tenor:str):
+        res=np.zeros(len(dates))
+        for i,d in enumerate(dates):
+            start=d+ql.Period('2D')
+            schedule= list(ql.MakeSchedule(start,start+ql.Period(tenor),ql.Period('1Y')))[1:]
+            P=self.discount_factor(schedule)
+            res[i]=(P[0]-P[-1])/np.sum(P[1:])
+        
+        return res
 
 class Risky_Curve:
 
     def __init__(self,curve:Curve,model:Intensity.Intensity):
-        
         self.curve=curve
         self.model=model
-
-    def Discount_Factor(self,tgrid:np.ndarray,risky:bool):
+        self.calendar=curve.calendar
+        self.calc_date=curve.calc_date
+        
+    def discount_factor(self,dates:list[ql.Date],risky:bool):
         R=self.model.entity.R
-        DF=self.curve.Discount_Factor(tgrid)
+        DF=self.curve.discount_factor(dates)
         if not risky:
             return DF
         else:
-             default_proba=np.array([1-self.model.compute_survival_proba(t) for t in tgrid ])
-             return DF*(1-default_proba*(1-R))
+            tgrid=[self.calendar.yearFraction(self.calc_date,d) for d in dates]
+            default_proba=np.array([1-self.model.compute_survival_proba(t) for t in tgrid ])
+            return DF*(1-default_proba*(1-R))
         
     def adjustment(self,t:float,T: np.ndarray):
         R=self.model.entity.R
         default_proba=self.model.compute_survival_proba(t)-self.model.compute_survival_proba(T)
-
         return (1-default_proba*(1-R))
