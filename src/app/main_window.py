@@ -47,8 +47,7 @@ class MainWindow(QMainWindow):
         self.ui.pageHome._animate_loading()
         self.data_manager.completed.connect(self.retrieve_mkt_data)
         self.data_manager.failed.connect(lambda err: self.ui.pageHome.setMessage(err))
-        #date=ql.Date.todaysDate()
-        date=ql.Date(11,11,2025)
+        date=ql.Date.todaysDate()
         self.data_manager.retrieve(date)
 
     def retrieve_mkt_data(self,mkt_data:dict[str:pd.DataFrame]):
@@ -61,16 +60,16 @@ class MainWindow(QMainWindow):
         if not hasattr(self,'mkt_data'):
             QMessageBox.warning(self, "Validation error", "Please load data before pricing")
         PAGE_MAPPING={"Rate":RateGetResults.compute_result_rate,
-                      "CMT":RateGetResults.compute_result_cmt,
-                      "SpreadCMT":RateGetResults.compute_result_cmt}
-        
+                        "CMT":RateGetResults.compute_result_cmt,
+                        "SpreadCMT":RateGetResults.compute_result_cmt}
+        print(input)
         self.pricing_manager.add_task(f"task_{self.pricing_manager.task_count}",
-                                      PAGE_MAPPING.get(input["_source_page"]),args=(self.mkt_data,input))
+                                        PAGE_MAPPING.get(input["_source_page"]),args=(self.mkt_data,input))
     
     def get_result_equity(self,input:dict):
         
         self.pricing_manager.add_task(f"task_{self.pricing_manager.task_count}",
-                                      EquityGetResults.compute_result,args=input)
+                                        EquityGetResults.compute_result,args=(input,))
 
     def _setup_logic(self):
         # Wire nav buttons to stacked widget pages
