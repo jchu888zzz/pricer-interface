@@ -1,10 +1,10 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTabWidget
 
-from .Forms.SingleRate import Ui_Autocall,Ui_Digit,Ui_RangeAccrual,Ui_Tarn
+from .Forms.SingleRate import Ui_Autocall,Ui_Digit,Ui_RangeAccrual,Ui_Tarn,Ui_MinMax
 
 dic_currency={'EUR':['BFRTEC10','SOLDE10E','SOLBE10E','SOITA10Y','SOLIT1OE'],
-              'USD':['H15T10Y']}
+                'USD':['H15T10Y']}
 
 class Ui_CMTPage(QWidget):
     """A tabbed widget containing several form tabs."""
@@ -44,6 +44,11 @@ class Ui_CMTPage(QWidget):
         self.form_tarn = Ui_Tarn(dic_currency)
         self.form_tarn.setObjectName("tab_tarn")
         self.tabs.addTab(self.form_tarn, "TARN")
+        
+        #Tab 5 -MinMax
+        self.form_minmax = Ui_MinMax(dic_currency)
+        self.form_minmax.setObjectName("tab_minmax")
+        self.tabs.addTab(self.form_minmax, "MinMax")
 
         layout.addWidget(self.tabs)
 
@@ -52,7 +57,8 @@ class Ui_CMTPage(QWidget):
         self.form_autocall.submitted.connect(lambda d: self._on_submitted(d, "Autocall"))
         self.form_digit.submitted.connect(lambda d: self._on_submitted(d, "Digit"))
         self.form_range.submitted.connect(lambda d: self._on_submitted(d, "RangeAccrual"))
-        self.form_range.submitted.connect(lambda d: self._on_submitted(d, "TARN"))
+        self.form_range.submitted.connect(lambda d: self._on_submitted(d, "Tarn"))
+        self.form_minmax.submitted.connect(lambda d: self._on_submitted(d, "MinMax"))
 
     def _on_submitted(self, input_data: dict, source_tab: str):
         # add source metadata and re-emit
