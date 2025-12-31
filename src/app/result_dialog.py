@@ -10,8 +10,8 @@ from app.ui_pages.ResultPage import Ui_ResultPageEquity,Ui_ResultPageRate
 class ResultDialog(QDialog):
     """
     A window with a QStackedWidget:
-      - Page 0: Modern loading page (animated dots)
-      - Page 1: Table display (dict to table)
+    - Page 0: Modern loading page (animated dots)
+    - Page 1: Table display (dict to table)
     """
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -79,8 +79,8 @@ class ResultDialog(QDialog):
 class ResultDialogEquity(QDialog):
     """
     A window with a QStackedWidget:
-      - Page 0: Modern loading page (animated dots)
-      - Page 1: Table display (dict to table)
+    - Page 0: Modern loading page (animated dots)
+    - Page 1: Table display (dict to table)
     """
     def __init__(self, parent=None):
         super().__init__(parent)
