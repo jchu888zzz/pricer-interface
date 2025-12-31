@@ -4,7 +4,7 @@ import pandas as pd
 
 from .Forms.Equity import Ui_Autocall
 
-path_markit_names=r"C:\Users\jorda\OneDrive\Documents\pricer_interface-main\Markit_names.xlsx"
+path_markit_names=r"\\Umilp-p2.cdm.cm-cic.fr\cic-lai-lae-cigogne$\1_Structuration\19_Quant\pricer-interface-main1\Markit_names.xlsx"
 df=pd.read_excel(path_markit_names)
 dic_currency=dict(tuple(df.groupby('Currency')['Underlyings']))
 dic_currency={key:value.to_list() for key,value in dic_currency.items()}
