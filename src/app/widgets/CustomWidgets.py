@@ -180,6 +180,68 @@ class IsCallable(QCheckBox):
         self.setObjectName("is_callable")
 
 
+# class CallableWidget(QWidget):
+#     def __init__(self):
+#         super().__init__()
+#         self.setup_ui()
+
+#     def setup_ui(self):
+#         layout=QFormLayout(self)
+#         layout.setContentsMargins(0,0,0,0)
+
+#         self.is_callable= IsCallable()
+#         layout.addRow("Is Callable :", self.is_callable)
+        
+#         self.stack=QStackedWidget()
+
+#         page_non_call=QWidget()
+#         self.stack.addWidget(page_non_call)
+
+#         page_call=QWidget()
+#         page_call_layout=QFormLayout(page_call)
+#         page_call_layout.setContentsMargins(0,0,0,0)
+
+#         self.diff_calendar= DiffCallCalendar()
+#         page_call_layout.addRow("Different Call Calendar :", self.diff_calendar)
+
+#         self.param_stack=QStackedWidget()
+#         page_same=QWidget()
+#         page_same_layout=QFormLayout(page_same)
+#         page_same_layout.setContentsMargins(0,0,0,0)
+        
+#         self.NC = NC()
+#         page_same_layout.addRow("NC :", self.NC)
+        
+#         self.multicall=MultiCall()
+#         page_same_layout.addRow("Multi call :", self.multicall)        
+#         self.param_stack.addWidget(page_same)
+
+#         page_custom=QWidget()
+#         page_custom_layout=QFormLayout(page_custom)
+#         page_custom_layout.setContentsMargins(0,0,0,0)
+#         self.first_call_date = FistCallDate()
+#         page_custom_layout.addRow("First Call Date :",self.first_call_date)
+
+#         self.call_frequency = CallFrequency()
+#         page_custom_layout.addRow("Call Frequency :", self.call_frequency)
+#         self.param_stack.addWidget(page_custom)
+
+#         page_call_layout.addRow(self.param_stack)
+#         self.stack.addWidget(page_call)
+
+#         layout.addRow("",self.stack)
+    
+#     def _retrieve_input(self) -> dict:
+        
+#         if not self.is_callable.isChecked():
+#             return {}
+#         if self.diff_calendar.isChecked():
+#             return {'first_call_date':self.first_call_date.date().toString("dd.MM.yyyy"),
+#                         'call_frequency':self.call_frequency.currentText()}
+#         else:
+#             return {"NC":str(self.NC.value()),
+#                     "multi-call":"true" if self.multicall.isChecked() else "false"}
+
 class CallableWidget(QWidget):
     def __init__(self):
         super().__init__()
@@ -200,33 +262,13 @@ class CallableWidget(QWidget):
         page_call=QWidget()
         page_call_layout=QFormLayout(page_call)
         page_call_layout.setContentsMargins(0,0,0,0)
-
-        self.diff_calendar= DiffCallCalendar()
-        page_call_layout.addRow("Different Call Calendar :", self.diff_calendar)
-
-        self.param_stack=QStackedWidget()
-        page_same=QWidget()
-        page_same_layout=QFormLayout(page_same)
-        page_same_layout.setContentsMargins(0,0,0,0)
         
         self.NC = NC()
-        page_same_layout.addRow("NC :", self.NC)
+        page_call_layout.addRow("NC :", self.NC)
         
         self.multicall=MultiCall()
-        page_same_layout.addRow("Multi call :", self.multicall)        
-        self.param_stack.addWidget(page_same)
+        page_call_layout.addRow("Multi call :", self.multicall)        
 
-        page_custom=QWidget()
-        page_custom_layout=QFormLayout(page_custom)
-        page_custom_layout.setContentsMargins(0,0,0,0)
-        self.first_call_date = FistCallDate()
-        page_custom_layout.addRow("First Call Date :",self.first_call_date)
-
-        self.call_frequency = CallFrequency()
-        page_custom_layout.addRow("Call Frequency :", self.call_frequency)
-        self.param_stack.addWidget(page_custom)
-
-        page_call_layout.addRow(self.param_stack)
         self.stack.addWidget(page_call)
 
         layout.addRow("",self.stack)
@@ -235,12 +277,9 @@ class CallableWidget(QWidget):
         
         if not self.is_callable.isChecked():
             return {}
-        if self.diff_calendar.isChecked():
-            return {'first_call_date':self.first_call_date.date().toString("dd.MM.yyyy"),
-                        'call_frequency':self.call_frequency.currentText()}
-        else:
-            return {"NC":str(self.NC.value()),
-                    "multi-call":"true" if self.multicall.isChecked() else "false"}
+
+        return {"NC":str(self.NC.value()),
+                "multi-call":"true" if self.multicall.isChecked() else "false"}
 
 
 class HasGuaranteedCoupon(QCheckBox):
@@ -371,6 +410,33 @@ class UpperboundLevel(QDoubleSpinBox):
     def setup_ui(self):
         self.setObjectName("upperbound_level")
         self.setRange(-10.0,10.0)
+        self.setDecimals(2)
+        self.setValue(5.0)
+        self.setSuffix("%")
+        self.setButtonSymbols(QAbstractSpinBox.NoButtons)
+
+
+class Floor(QDoubleSpinBox):
+    def __init__(self):
+        super().__init__()
+        self.setup_ui()
+    
+    def setup_ui(self):
+        self.setObjectName("floor")
+        self.setRange(-10.0,10.0)
+        self.setDecimals(2)
+        self.setValue(0.0)
+        self.setSuffix("%")
+        self.setButtonSymbols(QAbstractSpinBox.NoButtons)
+
+class Cap(QDoubleSpinBox):
+    def __init__(self):
+        super().__init__()
+        self.setup_ui()
+    
+    def setup_ui(self):
+        self.setObjectName("cap")
+        self.setRange(-10.0,20.0)
         self.setDecimals(2)
         self.setValue(5.0)
         self.setSuffix("%")
