@@ -1,4 +1,3 @@
-
 from PySide6.QtCore import QObject,Signal,Slot,QThread
 from queue import Queue
 
@@ -47,7 +46,7 @@ class MktDataManager(QObject):
     
     def __init__(self, path_folder: str = None):
         super().__init__()
-        self.path_folder = path_folder or r"C:\Users\jorda\OneDrive\Documents\pricer_interface-main\snapshot"
+        self.path_folder = path_folder or r"\\Umilp-p2.cdm.cm-cic.fr\cic-lai-lae-cigogne$\1_Structuration\6_Lexifi\Market_data"
         self.worker = None
         self.thread = None
     
