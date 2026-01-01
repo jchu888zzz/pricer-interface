@@ -2,17 +2,13 @@ import numpy as np
 import QuantLib as ql
 import typing 
 import scipy
-from sklearn.linear_model import LinearRegression,Ridge
-from sklearn.kernel_ridge import KernelRidge
-from sklearn.svm import SVR
-from sklearn.ensemble import GradientBoostingRegressor,RandomForestRegressor
+from sklearn.base import clone
+from sklearn.linear_model import Ridge
 from sklearn.neighbors import KNeighborsRegressor
-
 
 import Pricing.Utilities.Functions as Functions
 import Pricing.Rates.Payoffs.Base as Base
 from Pricing.Rates import Funding
-
 
 def get_polynomial_basis(undl:np.ndarray,deg:int):
     basis=undl.copy()
@@ -26,45 +22,47 @@ def get_laguerre_basis(undl:np.ndarray,deg:int):
         basis=np.c_[scipy.special.eval_laguerre(i,undl),basis]
     return basis
 
-
-def retrieve_func_basis(deg:int,option="laguerre"):
-    if option=='laguerre':
-        return lambda x : get_laguerre_basis(x,deg)
-    elif option=='polynomial':
-        return lambda x : get_polynomial_basis(x,deg)
-    else:
-        raise ValueError(f'{option} not implemented')
+MAPPING_BASIS={'laguerre':lambda x,deg : get_laguerre_basis(x,deg),
+                'polynomial': lambda x,deg :get_polynomial_basis(x,deg) }
 
 def get_regression_for_bond_with_undl(contract,dic_arg:dict,
-                                      deg:int,option='laguerre') -> list[RandomForestRegressor]:
+                                        deg:int,regressor_class:KNeighborsRegressor | Ridge,
+                                        basis_option='polynomial') -> list[KNeighborsRegressor | Ridge]:
     """ simulation rates shape: (len(tgrid),nb simu) """
-    
-    func_basis=retrieve_func_basis(deg,option=option)
 
     nbsimu=dic_arg['rates'].shape[1]
-    df_continuation=dic_arg['df_continuation']
     cashflows=contract.compute_cashflows(dic_arg)
     stop_idxs=[len(contract.paygrid)-1]*nbsimu
     res=[]
-
-    for idx,discount_factor in zip(reversed(contract.call_idxs),reversed(df_continuation)):
-        adjusted_cashflows=Base.adjust_to_stop_idxs(cashflows,stop_idxs,contract.infine)
-        Y=np.sum(adjusted_cashflows[:,idx+1:]*discount_factor,axis=1)
-        Y+= np.array([x[k-(idx+1)] for x,k in zip(discount_factor,stop_idxs)])
+    
+    for idx,df_cont,df_exercise in zip(reversed(contract.call_idxs),
+                                    reversed(dic_arg['df_continuation']),
+                                    reversed(dic_arg['df_exercise'])):
         
-        basis=func_basis(dic_arg['undl'][idx])
-        #reg=RandomForestRegressor()
-        reg=KNeighborsRegressor(n_neighbors=5)
+        adjusted_cashflows=Base.adjust_to_stop_idxs(cashflows,stop_idxs,contract.infine)
+        #Continuation value
+        Y=np.sum(adjusted_cashflows[:,idx+1:]*df_cont,axis=1)
+        #Add capital at stopping time
+        Y+= np.array([x[k-(idx+1)] for x,k in zip(df_cont,stop_idxs)])
+
+        basis=MAPPING_BASIS.get(basis_option)(dic_arg['undl'][idx],deg)
+        reg=clone(regressor_class)
         reg.fit(basis,Y)
         res.insert(0,reg)
+        exercise_value = df_exercise * (1 + contract.infine * cashflows[:, idx])
+        continuation_value = reg.predict(basis)
+
+        decision = continuation_value>exercise_value
+        #Update stop idxs based on decision
+        stop_idxs= [idx if d else old_value for d,old_value in zip(decision,stop_idxs) ]
 
     return res
 
 def get_regression_for_swap_with_undl(contract,dic_arg:dict,fund_leg,
-                                      spread:float,deg:int,option='laguerre') -> list[RandomForestRegressor]:
+                                        spread:float,deg:int,
+                                        regressor_class:KNeighborsRegressor | Ridge,
+                                        basis_option='polynomial') -> list[KNeighborsRegressor | Ridge]:
     
-    func_basis=retrieve_func_basis(deg,option=option)
-
     nbsimu=dic_arg['rates'].shape[1]
     cashflows=contract.compute_cashflows(dic_arg)
 
@@ -79,8 +77,8 @@ def get_regression_for_swap_with_undl(contract,dic_arg:dict,fund_leg,
 
     fund_cf=fund_leg.compute_cashflows(spread)
     for idx,Pt_T,fund_Pt_T in zip(reversed(contract.call_idxs),
-                                  reversed(dic_arg['df_continuation']),
-                                  reversed(fund_leg.df_continuation)):
+                                    reversed(dic_arg['df_continuation']),
+                                    reversed(fund_leg.df_continuation)):
 
         adjusted_cashflows=Base.adjust_to_stop_idxs(cashflows,stop_idxs,contract.infine)
         structure_price=np.sum(adjusted_cashflows[:,idx+1:]*Pt_T,axis=1)
@@ -93,48 +91,77 @@ def get_regression_for_swap_with_undl(contract,dic_arg:dict,fund_leg,
         
         Y=structure_price -fund_price
         
-        basis=func_basis(dic_arg['undl'][idx])
-        #reg=RandomForestRegressor()
-        reg=KNeighborsRegressor(n_neighbors=5)
+        basis=MAPPING_BASIS.get(basis_option)(dic_arg['undl'][idx],deg)
+        reg=clone(regressor_class)
         reg.fit(basis,Y)
         res.insert(0,reg)
 
     return res
 
-def compute_stop_idxs_with_undl(contract,regressions:list[typing.Callable],dic_arg:dict,
-                                deg:int,include_principal:bool,option='laguerre') ->list[int]:
-    
-    func_basis=retrieve_func_basis(deg,option=option)
-        
+def compute_stop_idxs_with_undl(contract,regressions:list[KNeighborsRegressor | Ridge],dic_arg:dict,
+                                deg:int,include_principal:bool,basis_option='polynomial') ->list[int]:
+            
     nbsimu=dic_arg['rates'].shape[1]
     res=[len(contract.paygrid)-1]*nbsimu
     stop_idxs=[]
 
     cashflows=contract.compute_cashflows(dic_arg)
 
-    for i,idx in enumerate(contract.call_idxs):   
+    for i,idx in enumerate(contract.call_idxs):
+        time_to_maturity = contract.paygrid[-1] - contract.paygrid[idx]
+        epsilon = 0.00 * np.sqrt(time_to_maturity)
         Exercise_value=dic_arg['df_exercise'][i]*(include_principal+contract.infine*cashflows[:,idx])
-        basis=func_basis(dic_arg['undl'][idx])
-        decision=regressions[i].predict(basis)>Exercise_value
+        basis=MAPPING_BASIS.get(basis_option)(dic_arg['undl'][idx],deg)
+        #Allow small threshold (numerical noise)
+        exercise_threshold = 1 +epsilon
+        decision=regressions[i].predict(basis)>Exercise_value*exercise_threshold
         new_stop_idxs=[ j for j,b in enumerate(decision) if b==1 and j not in stop_idxs]
         stop_idxs+=new_stop_idxs
         res=[ idx if j in new_stop_idxs else x for j,x in enumerate(res) ]
         
     return res
 
+
+def prep_discount_factor_from_rates(contract,model,risky_curve
+                                    ,dic_arg:dict,dic_arg_helper:dict,risky:bool):
+    df_cont_helper=[None]*len(contract.call_idxs)  
+    df_exercise=[None]*len(contract.call_idxs)
+    df_exercise_helper=[None]*len(contract.call_idxs)
+    
+    for i,idx in enumerate(contract.call_idxs):
+        t=contract.fixgrid[idx]
+        df_exercise[i]=model.compute_discount_factor_from_rates(dic_arg['rates'][idx],t,
+                                                                contract.paygrid[idx])*model.DF(contract.fixgrid[idx])
+        df_cont_helper[i]=model.compute_discount_factor_from_rates(dic_arg_helper['rates'][idx],t,
+                                                                    contract.paygrid[idx+1:])*model.DF(contract.fixgrid[idx])
+        df_exercise_helper[i]=model.compute_discount_factor_from_rates(dic_arg_helper['rates'][idx],t,
+                                                                contract.paygrid[idx])*model.DF(contract.fixgrid[idx])
+        if risky:
+            df_exercise[i]*=risky_curve.adjustment(t,contract.paygrid[idx])
+            df_exercise_helper[i]*=risky_curve.adjustment(t,contract.paygrid[idx])
+            df_cont_helper[i]*=np.array([risky_curve.adjustment(t,T)  
+                                            for T in contract.paygrid[idx+1:] ])
+    
+    dic_arg['df_exercise']=df_exercise
+    
+    dic_arg_helper['df_continuation']=df_cont_helper
+    dic_arg_helper['df_exercise']=df_exercise_helper
+    return dic_arg,dic_arg_helper
+    
+
 def prep_callable_contract(calc_date:ql.Date,contract,model,risky_curve,risky:bool) :
 
     dic_currency={'EUR':'3M','USD':'Overnight'}
 
     data_rates=model.generate_rates(calc_date,contract.pay_dates[-1],
-                                    cal=ql.Thirty360(ql.Thirty360.BondBasis),Nbsimu=10000)
+                                    cal=ql.Actual360(),Nbsimu=10000)
     
     contract.compute_grid(calc_date,cal=ql.Thirty360(ql.Thirty360.BondBasis))
     contract.compute_funding_adjustment(calc_date)
     dic_arg=Base.prep_undl(contract,model,data_rates,include_rates=True)
     if contract.hasunderlying :
-        contract.fwds=[np.mean(x) for x in dic_arg['undl']]
-    
+        #contract.fwds=[np.mean(x) for x in dic_arg['undl']]
+        contract.fwds=np.mean(dic_arg['undl'],axis=1)
     res=dict()
 
     if contract.structure_type=='Swap':
@@ -159,32 +186,19 @@ def prep_callable_contract(calc_date:ql.Date,contract,model,risky_curve,risky:bo
         
         dic_arg_helper=Base.prep_undl(contract,model,data_rates_helper,include_rates=True)
         
-        df_cont_helper=[None]*len(contract.call_idxs)  
-        df_exercise=[None]*len(contract.call_idxs)
-        for i,idx in enumerate(contract.call_idxs):
-            t=contract.fixgrid[idx]
-            df_exercise[i]=model.compute_discount_factor_from_rates(dic_arg['rates'][idx],t,
-                                                                    contract.paygrid[idx])*model.DF(contract.fixgrid[idx])
-            df_cont_helper[i]=model.compute_discount_factor_from_rates(dic_arg_helper['rates'][idx],t,
-                                                                        contract.paygrid[idx+1:])*model.DF(contract.fixgrid[idx])
-            if risky:
-                df_exercise[i]*=risky_curve.adjustment(t,contract.paygrid[idx])
-                df_cont_helper[i]*=np.array([risky_curve.adjustment(t,T)  
-                                                for T in contract.paygrid[idx+1:] ])
-
+        prep_discount_factor_from_rates(contract,model,risky_curve
+                                    ,dic_arg,dic_arg_helper,risky)
+        
         measure_change_factor=np.array([Base.compute_measure_change_factor(model,dic_arg['rates'][i],t,contract.paygrid[-1]) 
                                         for i,t in enumerate(contract.paygrid) ])
         
-        dic_arg.update({'df_exercise':df_exercise,
-                        'measure_change_factor':measure_change_factor})
-        dic_arg_helper.update({'df_continuation':df_cont_helper})
-
+        dic_arg['measure_change_factor']=measure_change_factor
         res.update({'contract':contract,
                     'dic_arg_helper':dic_arg_helper,
                     'dic_arg':dic_arg})
         return res
     
-def compute_price(dic_prep:dict,risky_curve):
+def compute_price(dic_prep:dict,risky_curve,basis_option:str,regressor_class:KNeighborsRegressor | Ridge):
     """
     Compute price for callable bond or swap.
     """
@@ -206,19 +220,24 @@ def compute_price(dic_prep:dict,risky_curve):
 
     #Process if callable
     if 'dic_arg_helper' in dic_prep.keys():
-        deg=5
+        deg=3
         dic_arg_helper=contract.update_arg_pricing(contract.coupon,dic_prep['dic_arg_helper'])
         
         if is_swap:
             regressions=get_regression_for_swap_with_undl(contract,dic_arg_helper,
-                                                        funding_leg,contract.funding_spread,deg)
+                                                        funding_leg,contract.funding_spread,deg,
+                                                        basis_option=basis_option,
+                                                        regressor_class=regressor_class)
             include_principal=False
         else:
-            regressions=get_regression_for_bond_with_undl(contract,dic_arg_helper,deg)
+            regressions=get_regression_for_bond_with_undl(contract,dic_arg_helper,deg,
+                                                        basis_option=basis_option,
+                                                        regressor_class=regressor_class)
             include_principal=True
         
         stop_idxs=compute_stop_idxs_with_undl(contract,regressions,dic_arg,
-                                            deg,include_principal=include_principal)
+                                            deg,include_principal=include_principal,
+                                            basis_option=basis_option)
 
         contract.compute_cashflows(dic_arg)
         cashflows=Base.adjust_to_stop_idxs(cashflows,stop_idxs,contract.infine)
@@ -258,7 +277,7 @@ def compute_price(dic_prep:dict,risky_curve):
     
     return res
 
-def solve_coupon(dic_prep:dict,risky_curve):
+def solve_coupon(dic_prep:dict,risky_curve,basis_option:str,regressor_class:KNeighborsRegressor | Ridge):
     """
     Solve for optimal coupon for callable bond or swap.
     For bonds: risky=True/False determines discount factor
@@ -306,23 +325,31 @@ def solve_coupon(dic_prep:dict,risky_curve):
         return res_coupon,res_funding
     
     else:
-        deg=5
+        deg=3
         if is_swap:
             def func_to_solve(x:float):
                 dic_arg_helper=contract.update_arg_pricing(x,dic_prep['dic_arg_helper']) 
                 dic_arg=contract.update_arg_pricing(x,dic_prep['dic_arg']) 
                 #Compute spread based on bond's duration
-                regressions=get_regression_for_bond_with_undl(contract,dic_arg_helper,deg)
+                regressions=get_regression_for_bond_with_undl(contract,dic_arg_helper,deg,
+                                                        basis_option=basis_option,
+                                                        regressor_class=regressor_class)
                 stop_idxs=compute_stop_idxs_with_undl(contract,regressions,dic_arg,
-                                                    deg,include_principal=True)
+                                            deg,include_principal=True,
+                                            basis_option=basis_option)
                 proba_recall=contract.compute_recall_proba(stop_idxs)
-                funding_spread=Base.get_funding_spread_early_redemption(risky_curve,contract.paygrid,proba_recall,contract.funding_adjustment)
+                funding_spread=Base.get_funding_spread_early_redemption(risky_curve,contract.paygrid,
+                                                                        proba_recall,
+                                                                        contract.funding_adjustment)
                 #Use spread to compute swap value
                 regressions=get_regression_for_swap_with_undl(contract,dic_arg_helper,
-                                                            funding_leg,funding_spread,deg)
+                                                            funding_leg,funding_spread,deg,
+                                                            basis_option=basis_option,
+                                                            regressor_class=regressor_class)
             
                 stop_idxs=compute_stop_idxs_with_undl(contract,regressions,dic_arg,
-                                                    deg,include_principal=False)
+                                                    deg,include_principal=False,
+                                                    basis_option=basis_option)
                 cashflows=contract.compute_cashflows(dic_arg)
                 cashflows=Base.adjust_to_stop_idxs(cashflows,stop_idxs,contract.infine)
                 coupons=np.mean(cashflows,axis=0)
@@ -334,11 +361,13 @@ def solve_coupon(dic_prep:dict,risky_curve):
         else:
             def func_to_solve(x:float):
                 dic_arg_helper=contract.update_arg_pricing(x,dic_prep['dic_arg_helper']) 
-                regressions=get_regression_for_bond_with_undl(contract,dic_arg_helper,
-                                                            deg)
+                regressions=get_regression_for_bond_with_undl(contract,dic_arg_helper,deg,
+                                                        basis_option=basis_option,
+                                                        regressor_class=regressor_class)
                 dic_arg=contract.update_arg_pricing(x,dic_prep['dic_arg']) 
                 stop_idxs=compute_stop_idxs_with_undl(contract,regressions,dic_arg,
-                                                    deg,include_principal=True)
+                                                        deg,include_principal=True,
+                                                        basis_option=basis_option)
                 cashflows=contract.compute_cashflows(dic_arg)
                 cashflows=Base.adjust_to_stop_idxs(cashflows,stop_idxs,contract.infine)
                 coupons=np.mean(cashflows,axis=0)
@@ -353,14 +382,19 @@ def solve_coupon(dic_prep:dict,risky_curve):
 
         if is_swap:
             #compute spread based on the coupon value 
-            regressions=get_regression_for_bond_with_undl(contract,dic_arg_helper,deg)
+            regressions=get_regression_for_bond_with_undl(contract,dic_arg_helper,deg,
+                                                        basis_option=basis_option,
+                                                        regressor_class=regressor_class)
             stop_idxs=compute_stop_idxs_with_undl(contract,regressions,dic_arg,
                                                 deg,include_principal=True)
             proba_recall=contract.compute_recall_proba(stop_idxs)
-            res_funding=Base.get_funding_spread_early_redemption(risky_curve,contract.paygrid,proba_recall,contract.funding_adjustment)
+            res_funding=Base.get_funding_spread_early_redemption(risky_curve,contract.paygrid,
+                                                                    proba_recall,
+                                                                    contract.funding_adjustment)
         else:
-            regressions=get_regression_for_bond_with_undl(contract,dic_arg_helper,
-                                                        deg)
+            regressions=get_regression_for_bond_with_undl(contract,dic_arg_helper,deg,
+                                                        basis_option=basis_option,
+                                                        regressor_class=regressor_class)
             stop_idxs=compute_stop_idxs_with_undl(contract,regressions,dic_arg,
                                                 deg,include_principal=True)
             proba_recall=contract.compute_recall_proba(stop_idxs)
