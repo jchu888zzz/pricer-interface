@@ -1,5 +1,6 @@
 import numpy as np
 import QuantLib as ql
+from sklearn.neighbors import KNeighborsRegressor
 
 import Pricing.Rates.Payoffs.Base as Base
 import Pricing.Utilities.InputConverter as InputConverter
@@ -9,11 +10,16 @@ def precomputation(calc_date:ql.Date,model,data:dict[str:str],risky_curve,risky:
     contract=RangeAccrual(data)
     return CallableFeature.prep_callable_contract(calc_date,contract,model,risky_curve,risky)
 
+REGRESSOR_CLASS=KNeighborsRegressor(n_neighbors=20)
 def compute_price(dic_prep:dict,risky_curve):
-    return CallableFeature.compute_price(dic_prep,risky_curve)
+    return CallableFeature.compute_price(dic_prep,risky_curve,
+                                        basis_option='polynomial',
+                                        regressor_class=REGRESSOR_CLASS)
 
 def solve_coupon(dic_prep:dict,risky_curve):
-    return CallableFeature.solve_coupon(dic_prep,risky_curve)
+    return CallableFeature.solve_coupon(dic_prep,risky_curve,
+                                        basis_option='polynomial',
+                                        regressor_class=REGRESSOR_CLASS)
 
 class Process :
     def compute_price(prep_model:dict,param_contract:dict):
