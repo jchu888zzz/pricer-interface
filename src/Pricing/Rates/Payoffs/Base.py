@@ -127,8 +127,8 @@ class Payoff :
         if 'first_call_date' in parameters.keys():
             first_call_date=InputConverter.convert_date(parameters['first_call_date'])
             frequency=InputConverter.freq_converter(parameters['call_frequency'])
-            self.call_dates=Dates.compute_target_schedule(first_call_date,self.pay_dates[-1],frequency)
-            self.call_idxs=[Functions.find_idx(self.fix_dates,x) for x in self.call_dates ]
+            self.call_dates=Dates.compute_target_schedule(first_call_date,self.pay_dates[-1],frequency)[:-1]
+            #self.call_idxs=[Functions.find_idx(self.fix_dates,x) for x in self.call_dates ]
             self.is_callable=True  
             return
         if 'NC' in parameters.keys():
@@ -138,7 +138,7 @@ class Payoff :
             if 'multi-call' in parameters.keys():
                 if parameters['multi-call']=='true':
                     self.call_dates+=list(self.fix_dates[non_call+1:-1])
-            self.call_idxs=[Functions.find_idx(self.fix_dates,x) for x in self.call_dates ]
+            #self.call_idxs=[Functions.find_idx(self.fix_dates,x) for x in self.call_dates ]
             return
         
     def get_guaranteed_coupon_info(self,parameters:dict):
@@ -146,12 +146,11 @@ class Payoff :
         self.NC=0
         if "nb_guaranteed_coupon" in parameters.keys():
             nb_guaranteed_coupon=int(parameters['nb_guaranteed_coupon'])
-            self.guaranteed_coupon_dates=self.pay_dates[:nb_guaranteed_coupon]
-            self.guaranteed_coupon=InputConverter.set_param(parameters['guaranteed_coupon'],0)
-            self.guaranteed_coupon_idxs=[Functions.find_idx(self.pay_dates,x) for x in self.guaranteed_coupon_dates ]
+            self.guar_coupon_dates=self.pay_dates[:nb_guaranteed_coupon]
+            self.guar_coupon=InputConverter.set_param(parameters['guaranteed_coupon'],0)
 
             self.NC=nb_guaranteed_coupon
-            self.sum_coupon_floor=self.guaranteed_coupon*nb_guaranteed_coupon
+            self.sum_coupon_floor=self.guar_coupon*nb_guaranteed_coupon
 
     def get_undl_info(self,parameters:dict):
         self.hasunderlying=False
@@ -186,16 +185,13 @@ class Payoff :
         grid=np.array([cal.yearFraction(start,x) for x in self.pay_dates])
         self.delta=np.array([grid[0]] + [x-y for x,y in zip(grid[1:],grid)])
 
-        self.fixgrid=np.array([ql.Actual360().yearFraction(start,x) for x in self.fix_dates])
-        self.paygrid=np.array([ql.Actual360().yearFraction(start,x) for x in self.pay_dates])
-
         if hasattr(self,'call_dates'):
-            self.callgrid=np.array([cal.yearFraction(start,x) for x in self.call_dates if x> start ])
-            self.call_idxs=[Functions.find_idx(self.fix_dates,x) for x in self.call_dates if x> start]
+            self.call_dates=[x for x in self.call_dates if x> start ]
+            #self.call_idxs=[Functions.find_idx(self.fix_dates,x) for x in self.call_dates if x> start]
 
         if hasattr(self,"guaranteed_coupon_dates"):
-            self.guaranteed_coupon_idxs=[Functions.find_idx(self.pay_dates,x) for x in self.guaranteed_coupon_dates if x> start]
-            self.NC=max(self.guaranteed_coupon_idxs) if self.guaranteed_coupon_idxs else 1
+            self.guar_coupon_dates=[x for x in self.guar_coupon_dates if x> start]
+            self.NC=len(self.guar_coupon_dates) if self.guar_coupon_dates else 1
 
     def compute_funding_adjustment(self,calc_date:ql.Date):
         if self.issue_date> calc_date+ql.Period('2M'):
@@ -205,11 +201,10 @@ class Payoff :
 
     def compute_recall_proba(self,stop_idxs):
         dic_res=Counter(stop_idxs)
-        res=np.zeros(len(self.paygrid))
+        res=np.zeros(len(self.pay_dates))
         for key,value in dic_res.items():
             res[key]=value/len(stop_idxs)
         return res
-
 #Result and spread functions
 def organize_structure_table(contract,ZC) -> dict:
 
