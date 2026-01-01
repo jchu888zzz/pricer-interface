@@ -1,23 +1,25 @@
 import numpy as np
 import QuantLib as ql
+from sklearn.linear_model import Ridge
 
 from Pricing.Rates.Payoffs import Base
 from Pricing.Utilities import InputConverter
-from . import CallableFeature
+from . import CallableFeature1,CallableFeature
 
 def precomputation(calc_date:ql.Date,model,data:dict[str:str],risky_curve,risky:bool):
     contract=MinMax(data)
     return CallableFeature.prep_callable_contract(calc_date,contract,model,risky_curve,risky)
+    #return CallableFeature1.prep_callable_contract(calc_date,contract,model,risky_curve,risky)
 
-def compute_price_callable(dic_prep:dict,risky_curve,risky:bool=False):
+REGRESSOR_CLASS=Ridge(alpha=0.8,fit_intercept=True)
+def compute_price(dic_prep:dict,risky_curve,basis_option:str='polynomial'):
     """
     Compute price for callable MinMax bond or swap.
-    For bonds: risky=True/False determines discount factor
-    For swaps: risky=False (ignored), includes funding leg pricing
+    For bonds: risky=True determines discount factor
+    For swaps: risky=False, includes funding leg pricing
     """
     
     contract=dic_prep['contract']
-    
     # Check if this is a swap (has funding_leg) or bond
     is_swap='funding_leg' in dic_prep.keys()
     
@@ -26,17 +28,20 @@ def compute_price_callable(dic_prep:dict,risky_curve,risky:bool=False):
         funding_leg=dic_prep['funding_leg']
         funding_ZC=risky_curve.Discount_Factor(funding_leg.paygrid,risky=False)
     else:
-        ZC=risky_curve.Discount_Factor(contract.paygrid,risky)
+        ZC=risky_curve.Discount_Factor(contract.paygrid,risky=True)
 
     cashflows=contract.compute_cashflows(dic_prep['dic_arg'])
 
     if 'dic_arg_helper' in dic_prep.keys():
-        deg=5
+        deg=3
         regressions=CallableFeature.get_regression_for_bond_with_undl(contract,
-                                                                    dic_prep['dic_arg_helper'],deg)
+                                                                    dic_prep['dic_arg_helper'],deg,
+                                                                    basis_option=basis_option,
+                                                                    regressor_class=REGRESSOR_CLASS)
         
         stop_idxs=CallableFeature.compute_stop_idxs_with_undl(contract,regressions,dic_prep['dic_arg'],
-                                                                deg,include_principal=True)
+                                                                deg,include_principal=True,
+                                                                basis_option=basis_option)
         
         contract.compute_cashflows(dic_prep['dic_arg'])
         cashflows=Base.adjust_to_stop_idxs(cashflows,stop_idxs,contract.infine)
@@ -53,44 +58,34 @@ def compute_price_callable(dic_prep:dict,risky_curve,risky:bool=False):
             funding_leg.compute_values(contract.funding_spread)
 
     contract.res_coupon=np.mean(cashflows,axis=0)
-    
     if is_swap:
         structure_price=sum(contract.res_coupon*ZC)
         funding_price=sum(funding_leg.coupons*funding_ZC)
         price=structure_price-funding_price
-        
-        return {'Structure':Base.organize_structure_table(contract,ZC),
-                'Funding':Base.organize_funding_table(funding_leg,funding_ZC),
-                'Price':price,
-                'duration':sum(contract.proba_recall*contract.paygrid),
-                'funding_spread':contract.funding_spread}
     else:
         prices=contract.res_coupon+contract.res_capital
         price=sum(prices*ZC)
         
-        res=Base.organize_structure_table(contract,ZC)
-        res['Price']=price
-        res["duration"]=sum(contract.proba_recall*contract.paygrid)
-        res["funding_spread"]=Base.get_funding_spread_early_redemption(risky_curve,
-                                                                    contract.paygrid,contract.proba_recall)
-        return res
+    res=dict()
+    res['table']=Base.organize_structure_table(contract,ZC)
+    res['price']=price
+    res["duration"]=sum(contract.proba_recall*contract.paygrid)
+    res["funding_spread"]=Base.get_funding_spread_early_redemption(risky_curve,
+                                                                contract.paygrid,contract.proba_recall,
+                                                                contract.funding_adjustment)
+    
+    if is_swap:
+        res['funding_table']=Base.organize_funding_table(funding_leg,funding_ZC)
+    
+    return res
 
-
-# Backward compatibility aliases
-def compute_bond_price(dic_prep:dict,risky_curve,risky:bool):
-    return compute_price_callable(dic_prep,risky_curve,risky=risky)
-
-def compute_swap_price(dic_prep:dict,risky_curve):
-    return compute_price_callable(dic_prep,risky_curve,risky=False)
 
 class Process :
     def compute_price(prep_model:dict,param_contract:dict):
         dic_prep=precomputation(prep_model['calc_date'],prep_model['model'],
                             param_contract,prep_model['risky_curve'],risky=True)
-        if param_contract['structure_type']=='Bond':
-            return compute_bond_price(dic_prep,prep_model['risky_curve'],risky=True)
-        else:
-            return compute_swap_price(dic_prep,prep_model['risky_curve'])
+
+        return compute_price(dic_prep,prep_model['risky_curve'])
 
 
 class MinMax(Base.Payoff) :
