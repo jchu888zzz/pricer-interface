@@ -221,7 +221,6 @@ def organize_structure_table(contract,ZC) -> dict:
     return res
 
 def organize_funding_table(funding_leg,ZC:np.ndarray)-> dict:
-
     res={'Payment Dates':funding_leg.pay_dates,
         'Model Forward':np.mean(funding_leg.fwds,axis=0),
         'Proba':funding_leg.proba,

@@ -73,7 +73,7 @@ _PATTERNS={'Overnight': {'deposit':'Deposit', 'swap':r'^(?=.*Basis_swap)(?=.*V_O
 
 
 _BUSINESS_CALENDAR=ql.TARGET()
-_CRITERION={'EUR': (ql.Period("9M"),ql.Period("23M")),
+_CRITERION={'EUR': (ql.Period("8M"),ql.Period("18M")),
                     'USD':(ql.Period("5M"),ql.Period("12M")),
                     'GBP':(ql.Period("9M"),ql.Period("20M")),
                     'CHF':(ql.Period("9M"),ql.Period("18M")) }
@@ -261,7 +261,7 @@ class Curve:
                                         for t in fix_grid if t> t_prev])
             fix_DF= np.concatenate( (fix_prev_DF,self.parametric_form(t_prev)*np.exp(-fix_increments)) )        
 
-            lvl=sum(fix_DF*np.array([fix_grid[0]]+ [x-y for x,y in zip(fix_grid[1:],fix_grid)]))
+            lvl=sum(fix_DF*np.array([fix_grid[0]]+[x-y for x,y in zip(fix_grid[1:],fix_grid)]))
             
             float_grid=np.array([self.calendar.yearFraction(self.calc_date,x)
                                 for x in float_schedule])
@@ -287,7 +287,7 @@ class Curve:
             elif isinstance(item,Future):
                 t0=self.calendar.yearFraction(self.calc_date,item.start_date)
                 t1=self.calendar.yearFraction(self.calc_date,item.maturity_date)
-                increment=lambda r: np.exp(-interval_integral(r_prev,r,t0,t,t1))
+                increment=lambda r: np.exp(-interval_integral(r_prev,r,t_prev,t,t))
                 func=lambda r: from_futures(increment(r),t0,t1) - item.quote
                 
             elif isinstance(item,Swap) :
@@ -301,17 +301,17 @@ class Curve:
             else:
                 raise ValueError(f'{item} instance not valid')
                 
-                                
             r=brentq(func,-0.5,0.5,maxiter=100,xtol=1e-05)
             self.value[i]=self.value[i-1]*np.exp(-interval_integral(r_prev,r,t_prev,t,t))
             self.rates[i]=r
-            
             
     def discount_factor(self,dates:list[ql.Date]):
         tgrid=self.convert_dates_to_tgrid(dates)
         return self.parametric_form(tgrid)
     
-    
+    def discount_factor_from_times(self,t_array:np.ndarray):
+        return self.parametric_form(t_array)
+
     def forward_swap_rate(self,dates:list[ql.Date] | ql.Date,tenor:str,
                             fix_freq:str,float_freq:str) -> float:
         """ Forward value of the swap starting at time t"""

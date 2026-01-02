@@ -82,11 +82,9 @@ class Leg:
                 pay_idx=bisect(self.pay_dates,d)
                 self.zc_continuation[i]=model.compute_discount_factor_from_rates(rates[:,idx],t,paygrid[pay_idx:])
 
-    def compute_cashflows(self,spread:float):
-        
+    def compute_cashflows(self,spread:float):    
         return (self.fwds+spread)*np.tile(self.delta,(self.fwds.shape[0],1))
     
-
     def compute_values(self,spread:float):
         self.proba=np.ones(len(self.pay_dates))
         self.coupons=np.mean(self.compute_cashflows(spread),axis=0)
