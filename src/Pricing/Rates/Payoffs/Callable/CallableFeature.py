@@ -1,6 +1,5 @@
 import numpy as np
 import QuantLib as ql
-import typing 
 import scipy
 from sklearn.base import clone
 from sklearn.linear_model import Ridge
@@ -9,6 +8,77 @@ from sklearn.neighbors import KNeighborsRegressor
 import Pricing.Utilities.Functions as Functions
 import Pricing.Rates.Payoffs.Base as Base
 from Pricing.Rates import Funding
+
+def prep_discount_factor_from_rates(contract,model,risky_curve
+                                    ,dic_arg:dict,risky:bool):
+    zc_cont=[None]*len(contract.call_dates)  
+    zc_exec=[None]*len(contract.call_dates)
+    
+    calendar=risky_curve.calendar
+    calc_date=risky_curve.calc_date
+
+    for i,d in enumerate(contract.call_dates):
+        idx=Functions.find_idx(contract.fix_dates,d)
+        t_fix=calendar.yearFraction(calc_date,contract.fix_dates[idx])
+        t_cont=np.array([calendar.yearFraction(calc_date,d) for d in contract.pay_dates[idx:]] )
+        zc_exec[i]=model.compute_discount_factor_from_rates(dic_arg['rates'][idx],t_fix,
+                                                                t_cont[0]).ravel()
+        zc_cont[i]=model.compute_discount_factor_from_rates(dic_arg['rates'][idx],t_fix,
+                                                                    t_cont[1:])
+
+        if risky:
+            zc_exec[i]*=risky_curve.adjustment(t_fix,t_cont[0])
+            zc_cont[i]*=np.array([risky_curve.adjustment(t_fix,t) for t in t_cont[1:] ])
+
+    dic_arg['zc_exercise']=zc_exec
+    dic_arg['zc_continuation']=zc_cont    
+    return dic_arg
+    
+def prep_callable_contract(calc_date:ql.Date,contract,model,risky_curve,risky:bool) :
+
+    data_rates=model.generate_rates(calc_date,contract.pay_dates[-1],
+                                    cal=ql.Actual360(),Nbsimu=10000)
+    
+    contract._update(calc_date,cal=ql.Thirty360(ql.Thirty360.BondBasis))
+    contract.compute_funding_adjustment(calc_date)
+    dic_arg=Base.prep_undl(contract,model,data_rates,include_rates=True)
+    prep_discount_factor_from_rates(contract,model,risky_curve,dic_arg,risky)
+
+    if contract.hasunderlying :
+        #contract.fwds=[np.mean(x) for x in dic_arg['undl']]
+        contract.fwds=np.mean(dic_arg['undl'],axis=1)
+    res=dict()
+
+    if contract.structure_type=='Swap':
+        funding_leg=Funding.Leg(contract,contract.currency)
+        funding_leg.precomputation(calc_date,model,data_rates)
+        res.update({'funding_leg':funding_leg})
+
+    contract.paygrid=np.array([risky_curve.calendar.yearFraction(calc_date,d) for d in contract.pay_dates ])
+    if not hasattr(contract,'call_dates'):
+        contract.proba_recall=np.zeros_like(contract.pay_dates)
+        contract.proba_recall[-1]=1
+        contract.res_capital=contract.proba_recall
+        contract.duration=contract.paygrid[-1]
+        res.update({'contract':contract,
+                    'dic_arg':dic_arg})
+        return res
+
+    else:
+        data_rates_helper=model.generate_rates(calc_date,contract.pay_dates[-1],cal=ql.Thirty360(ql.Thirty360.BondBasis),
+                                    Nbsimu=1000,seed=42)
+        
+        dic_arg_helper=Base.prep_undl(contract,model,data_rates_helper,include_rates=True)
+        prep_discount_factor_from_rates(contract,model,risky_curve,dic_arg_helper,risky)
+        
+        measure_change_factor=np.array([Base.compute_measure_change_factor(model,dic_arg['rates'][i],t,contract.paygrid[-1]) 
+                                        for i,t in enumerate(contract.paygrid) ])
+        
+        dic_arg['measure_change_factor']=measure_change_factor
+        res.update({'contract':contract,
+                    'dic_arg_helper':dic_arg_helper,
+                    'dic_arg':dic_arg})
+        return res
 
 def get_polynomial_basis(undl:np.ndarray,deg:int):
     basis=undl.copy()
@@ -32,27 +102,28 @@ def get_regression_for_bond_with_undl(contract,dic_arg:dict,
 
     nbsimu=dic_arg['rates'].shape[1]
     cashflows=contract.compute_cashflows(dic_arg)
-    stop_idxs=[len(contract.paygrid)-1]*nbsimu
+    stop_idxs=[len(contract.pay_dates)-1]*nbsimu
     res=[]
     
-    for idx,df_cont,df_exercise in zip(reversed(contract.call_idxs),
-                                    reversed(dic_arg['df_continuation']),
-                                    reversed(dic_arg['df_exercise'])):
+    for d,df_cont,df_exercise in zip(reversed(contract.call_dates),
+                                    reversed(dic_arg['zc_continuation']),
+                                    reversed(dic_arg['zc_exercise'])):
         
+        idx=Functions.find_idx(contract.fix_dates,d)
         adjusted_cashflows=Base.adjust_to_stop_idxs(cashflows,stop_idxs,contract.infine)
         #Continuation value
-        Y=np.sum(adjusted_cashflows[:,idx+1:]*df_cont,axis=1)
+        continuation_value=np.sum(adjusted_cashflows[:,idx+1:]*df_cont,axis=1)
         #Add capital at stopping time
-        Y+= np.array([x[k-(idx+1)] for x,k in zip(df_cont,stop_idxs)])
+        continuation_value+= np.array([x[k-(idx+1)] for x,k in zip(df_cont,stop_idxs)])
 
         basis=MAPPING_BASIS.get(basis_option)(dic_arg['undl'][idx],deg)
         reg=clone(regressor_class)
-        reg.fit(basis,Y)
+        reg.fit(basis,continuation_value)
         res.insert(0,reg)
         exercise_value = df_exercise * (1 + contract.infine * cashflows[:, idx])
-        continuation_value = reg.predict(basis)
+        prediction = reg.predict(basis)
+        decision = prediction>exercise_value
 
-        decision = continuation_value>exercise_value
         #Update stop idxs based on decision
         stop_idxs= [idx if d else old_value for d,old_value in zip(decision,stop_idxs) ]
 
@@ -72,14 +143,16 @@ def get_regression_for_swap_with_undl(contract,dic_arg:dict,fund_leg,
         else:
             return sum(cf*df)
 
-    stop_idxs=[len(contract.paygrid)-1]*nbsimu
+    stop_idxs=[len(contract.pay_dates)-1]*nbsimu
     res=[]
 
     fund_cf=fund_leg.compute_cashflows(spread)
-    for idx,Pt_T,fund_Pt_T in zip(reversed(contract.call_idxs),
-                                    reversed(dic_arg['df_continuation']),
-                                    reversed(fund_leg.df_continuation)):
 
+    for d,Pt_T,fund_Pt_T in zip(reversed(contract.call_dates),
+                                    reversed(dic_arg['zc_continuation']),
+                                    reversed(fund_leg.zc_continuation)):
+
+        idx=Functions.find_idx(contract.fix_dates,d)
         adjusted_cashflows=Base.adjust_to_stop_idxs(cashflows,stop_idxs,contract.infine)
         structure_price=np.sum(adjusted_cashflows[:,idx+1:]*Pt_T,axis=1)
 
@@ -89,11 +162,11 @@ def get_regression_for_swap_with_undl(contract,dic_arg:dict,fund_leg,
         fund_price=np.array([compute_fund_price(fund_cf[j,fund_idx1:fund_idx2],fund_Pt_T[j,:fund_idx2-fund_idx1]) 
                             for j,fund_idx2 in enumerate(fundstop_idxs)])
         
-        Y=structure_price -fund_price
+        continuation_value=structure_price -fund_price
         
         basis=MAPPING_BASIS.get(basis_option)(dic_arg['undl'][idx],deg)
         reg=clone(regressor_class)
-        reg.fit(basis,Y)
+        reg.fit(basis,continuation_value)
         res.insert(0,reg)
 
     return res
@@ -102,101 +175,26 @@ def compute_stop_idxs_with_undl(contract,regressions:list[KNeighborsRegressor | 
                                 deg:int,include_principal:bool,basis_option='polynomial') ->list[int]:
             
     nbsimu=dic_arg['rates'].shape[1]
-    res=[len(contract.paygrid)-1]*nbsimu
+    res=[len(contract.pay_dates)-1]*nbsimu
     stop_idxs=[]
-
     cashflows=contract.compute_cashflows(dic_arg)
 
-    for i,idx in enumerate(contract.call_idxs):
+    for i,d in enumerate(contract.call_dates):
+        idx=Functions.find_idx(contract.fix_dates,d)
         time_to_maturity = contract.paygrid[-1] - contract.paygrid[idx]
         epsilon = 0.00 * np.sqrt(time_to_maturity)
-        Exercise_value=dic_arg['df_exercise'][i]*(include_principal+contract.infine*cashflows[:,idx])
+        Exercise_value=dic_arg['zc_exercise'][i]*(include_principal+contract.infine*cashflows[:,idx])
         basis=MAPPING_BASIS.get(basis_option)(dic_arg['undl'][idx],deg)
         #Allow small threshold (numerical noise)
         exercise_threshold = 1 +epsilon
         decision=regressions[i].predict(basis)>Exercise_value*exercise_threshold
         new_stop_idxs=[ j for j,b in enumerate(decision) if b==1 and j not in stop_idxs]
         stop_idxs+=new_stop_idxs
-        res=[ idx if j in new_stop_idxs else x for j,x in enumerate(res) ]
+        res=[ int(idx) if j in new_stop_idxs else x for j,x in enumerate(res) ]
         
     return res
 
 
-def prep_discount_factor_from_rates(contract,model,risky_curve
-                                    ,dic_arg:dict,dic_arg_helper:dict,risky:bool):
-    df_cont_helper=[None]*len(contract.call_idxs)  
-    df_exercise=[None]*len(contract.call_idxs)
-    df_exercise_helper=[None]*len(contract.call_idxs)
-    
-    for i,idx in enumerate(contract.call_idxs):
-        t=contract.fixgrid[idx]
-        df_exercise[i]=model.compute_discount_factor_from_rates(dic_arg['rates'][idx],t,
-                                                                contract.paygrid[idx])*model.DF(contract.fixgrid[idx])
-        df_cont_helper[i]=model.compute_discount_factor_from_rates(dic_arg_helper['rates'][idx],t,
-                                                                    contract.paygrid[idx+1:])*model.DF(contract.fixgrid[idx])
-        df_exercise_helper[i]=model.compute_discount_factor_from_rates(dic_arg_helper['rates'][idx],t,
-                                                                contract.paygrid[idx])*model.DF(contract.fixgrid[idx])
-        if risky:
-            df_exercise[i]*=risky_curve.adjustment(t,contract.paygrid[idx])
-            df_exercise_helper[i]*=risky_curve.adjustment(t,contract.paygrid[idx])
-            df_cont_helper[i]*=np.array([risky_curve.adjustment(t,T)  
-                                            for T in contract.paygrid[idx+1:] ])
-    
-    dic_arg['df_exercise']=df_exercise
-    
-    dic_arg_helper['df_continuation']=df_cont_helper
-    dic_arg_helper['df_exercise']=df_exercise_helper
-    return dic_arg,dic_arg_helper
-    
-
-def prep_callable_contract(calc_date:ql.Date,contract,model,risky_curve,risky:bool) :
-
-    dic_currency={'EUR':'3M','USD':'Overnight'}
-
-    data_rates=model.generate_rates(calc_date,contract.pay_dates[-1],
-                                    cal=ql.Actual360(),Nbsimu=10000)
-    
-    contract.compute_grid(calc_date,cal=ql.Thirty360(ql.Thirty360.BondBasis))
-    contract.compute_funding_adjustment(calc_date)
-    dic_arg=Base.prep_undl(contract,model,data_rates,include_rates=True)
-    if contract.hasunderlying :
-        #contract.fwds=[np.mean(x) for x in dic_arg['undl']]
-        contract.fwds=np.mean(dic_arg['undl'],axis=1)
-    res=dict()
-
-    if contract.structure_type=='Swap':
-        funding_leg=Funding.Leg(contract,dic_currency[contract.currency])
-        funding_leg.precomputation(calc_date,model,data_rates)
-        res.update({'funding_leg':funding_leg})
-
-    if not hasattr(contract,'call_dates'):
-
-        contract.proba_recall=np.zeros_like(contract.paygrid)
-        contract.proba_recall[-1]=1
-        contract.res_capital=contract.proba_recall
-        contract.duration=contract.paygrid[-1]
-        res.update({'contract':contract,
-                    'dic_arg':dic_arg})
-
-        return res
-
-    else:
-        data_rates_helper=model.generate_rates(calc_date,contract.pay_dates[-1],cal=ql.Thirty360(ql.Thirty360.BondBasis),
-                                    Nbsimu=1000,seed=42)
-        
-        dic_arg_helper=Base.prep_undl(contract,model,data_rates_helper,include_rates=True)
-        
-        prep_discount_factor_from_rates(contract,model,risky_curve
-                                    ,dic_arg,dic_arg_helper,risky)
-        
-        measure_change_factor=np.array([Base.compute_measure_change_factor(model,dic_arg['rates'][i],t,contract.paygrid[-1]) 
-                                        for i,t in enumerate(contract.paygrid) ])
-        
-        dic_arg['measure_change_factor']=measure_change_factor
-        res.update({'contract':contract,
-                    'dic_arg_helper':dic_arg_helper,
-                    'dic_arg':dic_arg})
-        return res
     
 def compute_price(dic_prep:dict,risky_curve,basis_option:str,regressor_class:KNeighborsRegressor | Ridge):
     """
@@ -209,11 +207,11 @@ def compute_price(dic_prep:dict,risky_curve,basis_option:str,regressor_class:KNe
     is_swap='funding_leg' in dic_prep.keys()
     
     if is_swap:
-        ZC=risky_curve.Discount_Factor(contract.paygrid,risky=False)
+        zc=risky_curve.discount_factor(contract.pay_dates,risky=False)
         funding_leg=dic_prep['funding_leg']
-        funding_ZC=risky_curve.Discount_Factor(funding_leg.paygrid,risky=False)
+        funding_zc=risky_curve.discount_factor(funding_leg.pay_dates,risky=False)
     else:
-        ZC=risky_curve.Discount_Factor(contract.paygrid,risky=True)
+        zc=risky_curve.discount_factor(contract.pay_dates,risky=True)
     
     dic_arg=contract.update_arg_pricing(contract.coupon,dic_prep['dic_arg']) 
     cashflows=contract.compute_cashflows(dic_arg)
@@ -256,24 +254,24 @@ def compute_price(dic_prep:dict,risky_curve,basis_option:str,regressor_class:KNe
     contract.res_coupon=np.mean(cashflows,axis=0)
     
     if is_swap:
-        structure_price=sum(contract.res_coupon*ZC)
-        funding_price=sum(funding_leg.coupons*funding_ZC)
+        structure_price=sum(contract.res_coupon*zc)
+        funding_price=sum(funding_leg.coupons*funding_zc)
         price=structure_price-funding_price
     else:
         prices=contract.res_coupon+contract.res_capital
-        price=sum(prices*ZC)
+        price=sum(prices*zc)
     
     res=dict()
-    res['table']=Base.organize_structure_table(contract,ZC)
+    res['table']=Base.organize_structure_table(contract,zc)
     res['price']=price
     res["duration"]=sum(contract.proba_recall*contract.paygrid)
     res["coupon"]=contract.coupon
     res["funding_spread"]=Base.get_funding_spread_early_redemption(risky_curve,
-                                                                contract.paygrid,contract.proba_recall,
+                                                                contract.pay_dates,contract.proba_recall,
                                                                 contract.funding_adjustment)
     
     if is_swap:
-        res['funding_table']=Base.organize_funding_table(funding_leg,funding_ZC)
+        res['funding_table']=Base.organize_funding_table(funding_leg,funding_zc)
     
     return res
 

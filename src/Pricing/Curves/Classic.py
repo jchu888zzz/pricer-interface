@@ -1,11 +1,8 @@
 import pandas as pd
 import QuantLib as ql
 import numpy as np
-from bisect import bisect
 
 from scipy.optimize import brentq
-from scipy.interpolate import CubicSpline
-from Pricing.Utilities import InputConverter
 from Pricing.Credit.Model import Intensity 
 import Pricing.Credit.Instruments as Credit_instruments
 
@@ -144,17 +141,46 @@ def sort_and_select_instruments(calc_date:ql.Date,df:pd.DataFrame,cur_name:str,o
 
     return sorted(res,key=lambda x: x.maturity_date)
 
-#To_vectorize
-def interval_integral(previous_r:float,r:float,t1:float,t:float,t2:float,eps=0.1) -> float:
-    h=t2-t1
-    t_delta=t-t1   
-    r_delta=r-previous_r
-    if t<= t1+ eps*h:    
-        res=t_delta*previous_r + r_delta*0.5*t_delta**2/(eps*h)
-    else:
-        res= eps*(h*previous_r + h*0.5*r_delta) + r*(1-eps)*(t-(t1+eps*h))
-    
-    return res
+def interval_integral(previous_r, r, t1, t_array, t2, eps=0.1):
+    """
+    Compute interval integral - handles both scalar and array inputs.
+
+    Args:
+        previous_r: Previous rate (scalar or array)
+        r: Current rate (scalar or array)
+        t1: Start time (scalar or array)
+        t_array: Time points to evaluate (scalar or array)
+        t2: End time (scalar or array)
+        eps: Parameter (default 0.1)
+
+    Returns:
+        Scalar or array of integral values matching input shape
+    """
+    # Handle scalar inputs
+    is_scalar = np.isscalar(t_array)
+    if is_scalar:
+        t_array = np.array([t_array])
+        previous_r = np.atleast_1d(previous_r)
+        r = np.atleast_1d(r)
+        t1 = np.atleast_1d(t1)
+        t2 = np.atleast_1d(t2)
+
+    h = t2 - t1
+    t_delta = t_array - t1
+    r_delta = r - previous_r
+
+    # Vectorized conditional: use np.where to branch based on condition
+    threshold = t1 + eps * h
+    # Calculate both branches
+    early_branch = t_delta * previous_r + r_delta * 0.5 * t_delta ** 2 / (eps * h)
+    late_branch = eps * (h * previous_r + h * 0.5 * r_delta) + r * (1 - eps) * (t_array - threshold)
+    # Select based on condition
+    result = np.where(t_array <= threshold, early_branch, late_branch)
+
+    # Return scalar if input was scalar
+    if is_scalar:
+        return result[0]
+    return result
 
 def find_first_zero(a) -> int:
     if 0 not in a:
@@ -178,16 +204,45 @@ class Curve:
     def convert_dates_to_tgrid(self,dates:list[ql.Date]):
         return [self.calendar.yearFraction(self.calc_date,d) for d in dates]
     
-    #To_vectorize
-    def parametric_form(self,t:float) ->float:
-        
-        idx=bisect(self.tgrid,t)
-        if idx>len(self.tgrid)-1:
-            idx=-1
-        t1,t2=self.tgrid[idx-1],self.tgrid[idx]
-        last_integral=interval_integral(self.rates[idx-1],self.rates[idx],t1,t,t2)
+    def parametric_form(self,t_array:np.ndarray) ->float:
 
-        return self.value[idx-1]*np.exp(-last_integral)
+        # Handle scalar input - check both np.isscalar and single-element arrays
+        is_scalar = np.isscalar(t_array) or (isinstance(t_array, np.ndarray) and t_array.size == 1)
+        if is_scalar:
+            # Return 1.0 for negative time values (no discounting)
+            if t_array < 0:
+                return 1.0
+            t_array = np.array([t_array])
+        else:
+            # For array inputs, handle negative values
+            t_array = np.asarray(t_array)
+
+        idx = np.searchsorted(self.tgrid, t_array)
+        # Handle boundary condition: if idx > len(tgrid) - 1, set to -1
+        idx = np.where(idx > len(self.tgrid) - 1, -1, idx)
+
+        # Get t1, t2 for each evaluation point
+        t1 = self.tgrid[idx - 1]
+        t2 = self.tgrid[idx]
+
+        # Get rates and values for previous indices
+        r_prev = self.rates[idx - 1]
+        r_curr = self.rates[idx]
+        val_prev = self.value[idx - 1]
+
+        # Compute last integral for all t values at once
+        # Note: Here we call our vectorized interval_integral
+        last_integral = interval_integral(r_prev, r_curr, t1, t_array, t2)
+
+        result = val_prev * np.exp(-last_integral)
+
+        # Handle negative values for array inputs: return 1.0 for t < 0
+        result = np.where(t_array <= 0, 1.0, result)
+
+        # Return scalar if input was scalar
+        if is_scalar:
+            return result[0]
+        return result
     
     def calibrate(self,instruments:list):
         
@@ -206,14 +261,14 @@ class Curve:
                                         for t in fix_grid if t> t_prev])
             fix_DF= np.concatenate( (fix_prev_DF,self.parametric_form(t_prev)*np.exp(-fix_increments)) )        
 
-            LVL=sum(fix_DF*np.array([fix_grid[0]]+ [x-y for x,y in zip(fix_grid[1:],fix_grid)]))
+            lvl=sum(fix_DF*np.array([fix_grid[0]]+ [x-y for x,y in zip(fix_grid[1:],fix_grid)]))
             
             float_grid=np.array([self.calendar.yearFraction(self.calc_date,x)
                                 for x in float_schedule])
 
             float_increment=interval_integral(r_prev,r,t_prev,float_grid[-1],float_grid[-1])
             float_DF=self.parametric_form(t_prev)*np.exp(-float_increment)     
-            return (1-float_DF)/LVL
+            return (1-float_DF)/lvl
         
         self.tgrid=np.array([0]+[self.calendar.yearFraction(self.calc_date,x.maturity_date)
                                     for x in instruments])        
@@ -226,8 +281,8 @@ class Curve:
             r_prev=self.rates[i-1]
 
             if isinstance(item,Deposit):
-                ZC=lambda r : self.value[i-1]*np.exp(-interval_integral(r_prev,r,t_prev,t,t))
-                func=lambda r: from_deposit(ZC(r),t) - item.quote
+                zc=lambda r : self.value[i-1]*np.exp(-interval_integral(r_prev,r,t_prev,t,t))
+                func=lambda r: from_deposit(zc(r),t) - item.quote
                 
             elif isinstance(item,Future):
                 t0=self.calendar.yearFraction(self.calc_date,item.start_date)
@@ -237,8 +292,8 @@ class Curve:
                 
             elif isinstance(item,Swap) :
                 if ql.Period(item.period)<ql.Period('1Y'):
-                    ZC=lambda r : self.value[i-1]*np.exp(-interval_integral(r_prev,r,t_prev,t,t))
-                    func=lambda r: from_deposit(ZC(r),item) - item.quote
+                    zc=lambda r : self.value[i-1]*np.exp(-interval_integral(r_prev,r,t_prev,t,t))
+                    func=lambda r: from_deposit(zc(r),item) - item.quote
                 else:
                     
                     func=lambda r: from_swap(r_prev,r,t_prev,item.fix_schedule,
@@ -250,40 +305,38 @@ class Curve:
             r=brentq(func,-0.5,0.5,maxiter=100,xtol=1e-05)
             self.value[i]=self.value[i-1]*np.exp(-interval_integral(r_prev,r,t_prev,t,t))
             self.rates[i]=r
-            self.interpolate=CubicSpline(self.tgrid,self.value)
+            
             
     def discount_factor(self,dates:list[ql.Date]):
         tgrid=self.convert_dates_to_tgrid(dates)
-        return self.interpolate(tgrid)
+        return self.parametric_form(tgrid)
     
-    def forward_swap_rate(self,dates:list[ql.Date],tenor:str,
-                            fix_freq=ql.Period('1Y'),float_freq=ql.Period('6M')) -> float:
-        """ Forward value of the swap of Term T starting at time t"""
+    
+    def forward_swap_rate(self,dates:list[ql.Date] | ql.Date,tenor:str,
+                            fix_freq:str,float_freq:str) -> float:
+        """ Forward value of the swap starting at time t"""
+        
+        is_single_point= isinstance(dates,ql.Date)
+
+        if is_single_point:
+            dates=[dates]
+        
         res=np.zeros(len(dates))
         for i,d in enumerate(dates):
             start=d+ql.Period('2D')
-            fix_schedule= list(ql.MakeSchedule(start,start+ql.Period(tenor),fix_freq))[1:]
+            fix_schedule= list(ql.MakeSchedule(start,start+ql.Period(tenor),ql.Period(fix_freq)))
             fix_grid=np.array([self.calendar.yearFraction(self.calc_date,x)
                                 for x in fix_schedule])
             P_fix=self.discount_factor(fix_schedule)
-            LVL=sum(P_fix*np.array([fix_grid[0]]+ [x-y for x,y in zip(fix_grid[1:],fix_grid)]))
+            lvl=sum(P_fix[1:]*np.array([x-y for x,y in zip(fix_grid[1:],fix_grid)]))
             
-            float_schedule= list(ql.MakeSchedule(start,start+ql.Period(tenor),float_freq))[1:]
+            float_schedule= list(ql.MakeSchedule(start,start+ql.Period(tenor),ql.Period(float_freq)))
             P_float=self.discount_factor(float_schedule)
-            res[i]=(P_float[0]-P_float[-1])/LVL
-            
-        return (P_float[0]-P_float[-1])/LVL
-    
-    #To vectorize
-    def forward_cms(self,dates:list[ql.Date],tenor:str):
-        res=np.zeros(len(dates))
-        for i,d in enumerate(dates):
-            start=d+ql.Period('2D')
-            schedule= list(ql.MakeSchedule(start,start+ql.Period(tenor),ql.Period('1Y')))[1:]
-            P=self.discount_factor(schedule)
-            res[i]=(P[0]-P[-1])/np.sum(P[1:])
-        
+            res[i]=(P_float[0]-P_float[-1])/lvl
+        if is_single_point:
+            return res[0]
         return res
+    
 
 class Risky_Curve:
 
@@ -292,18 +345,25 @@ class Risky_Curve:
         self.model=model
         self.calendar=curve.calendar
         self.calc_date=curve.calc_date
+        self.get_funding_spread_interp()
         
     def discount_factor(self,dates:list[ql.Date],risky:bool):
-        R=self.model.entity.R
-        DF=self.curve.discount_factor(dates)
+        Recovery=self.model.entity.R
+        zc=self.curve.discount_factor(dates)
         if not risky:
-            return DF
+            return zc
         else:
             tgrid=[self.calendar.yearFraction(self.calc_date,d) for d in dates]
             default_proba=np.array([1-self.model.compute_survival_proba(t) for t in tgrid ])
-            return DF*(1-default_proba*(1-R))
+            return zc*(1-default_proba*(1-Recovery))
         
     def adjustment(self,t:float,T: np.ndarray):
-        R=self.model.entity.R
+        Recovery=self.model.entity.R
         default_proba=self.model.compute_survival_proba(t)-self.model.compute_survival_proba(T)
-        return (1-default_proba*(1-R))
+        return (1-default_proba*(1-Recovery))
+    
+    def get_funding_spread_interp(self):
+
+        entity=self.model.entity
+        grid=[self.calendar.yearFraction(self.calc_date,self.calc_date+ql.Period(p)) for p in entity.tenors]
+        self.funding_spread_interp= lambda x : np.interp(x,grid,entity.quotes,left=entity.quotes[0],right=entity.quotes[-1])

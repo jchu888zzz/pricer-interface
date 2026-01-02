@@ -4,12 +4,11 @@ from sklearn.linear_model import Ridge
 
 from Pricing.Rates.Payoffs import Base
 from Pricing.Utilities import InputConverter
-from . import CallableFeature1,CallableFeature
+from . import CallableFeature
 
 def precomputation(calc_date:ql.Date,model,data:dict[str:str],risky_curve,risky:bool):
     contract=MinMax(data)
     return CallableFeature.prep_callable_contract(calc_date,contract,model,risky_curve,risky)
-    #return CallableFeature1.prep_callable_contract(calc_date,contract,model,risky_curve,risky)
 
 REGRESSOR_CLASS=Ridge(alpha=0.8,fit_intercept=True)
 def compute_price(dic_prep:dict,risky_curve,basis_option:str='polynomial'):

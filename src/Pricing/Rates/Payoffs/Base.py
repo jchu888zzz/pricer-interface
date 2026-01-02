@@ -65,16 +65,18 @@ def compute_bond_measure_change(measure_change_factor:np.ndarray,stop_idxs:np.nd
 def prep_undl(contract,model,data_rates:dict,include_rates=True) -> dict:
     if contract.hasunderlying :
         if hasattr(contract,'fixing_depth'):
+
+            fix_dates=np.insert(contract.fix_dates,0,contract.issue_date)
             # only range accrual 
             if contract.spreadunderlying:
-                dic_arg=model.compute_spread_undl_from_rates_with_depth(data_rates,contract.fixgrid,
+                dic_arg=model.compute_spread_undl_from_rates_with_depth(data_rates,fix_dates,
                                                                         contract.underlying_name1,contract.underlying_name2,
-                                                                        fixing_depth=contract.fixing_depth,
+                                                                        nb_sub_fix_points=contract.fixing_depth,
                                                                         include_rates=include_rates)
             else:
-                dic_arg=model.compute_single_undl_from_rates_with_depth(data_rates,contract.fixgrid,
+                dic_arg=model.compute_single_undl_from_rates_with_depth(data_rates,fix_dates,
                                                                     contract.underlying_name1,
-                                                                    fixing_depth=contract.fixing_depth,
+                                                                    nb_sub_fix_points=contract.fixing_depth,
                                                                     include_rates=include_rates)
             densities=contract.compute_densities(dic_arg['undl'])
             dic_arg.update({'undl':dic_arg['undl'][:,-1,:],'densities':densities})
@@ -82,11 +84,11 @@ def prep_undl(contract,model,data_rates:dict,include_rates=True) -> dict:
 
         else:
             if contract.spreadunderlying:
-                return model.compute_spread_undl_from_rates(data_rates,contract.fixgrid,
+                return model.compute_spread_undl_from_rates(data_rates,contract.fix_dates,
                                                                 contract.underlying_name1,contract.underlying_name2,
                                                                 include_rates=include_rates)
             else:
-                return model.compute_single_undl_from_rates(data_rates,contract.fixgrid,
+                return model.compute_single_undl_from_rates(data_rates,contract.fix_dates,
                                                                 contract.underlying_name1,
                                                                 include_rates=include_rates)
             
@@ -172,7 +174,7 @@ class Payoff :
             if parameters['memory_effect']=='true':
                 self.memory=True
 
-    def compute_grid(self,calc_date:ql.Date,cal=ql.Thirty360(ql.Thirty360.BondBasis)):
+    def _update(self,calc_date:ql.Date,cal=ql.Thirty360(ql.Thirty360.BondBasis)):
 
         idx=bisect(self.pay_dates,calc_date)
         self.fix_dates=self.fix_dates[idx:]
@@ -187,11 +189,10 @@ class Payoff :
 
         if hasattr(self,'call_dates'):
             self.call_dates=[x for x in self.call_dates if x> start ]
-            #self.call_idxs=[Functions.find_idx(self.fix_dates,x) for x in self.call_dates if x> start]
 
         if hasattr(self,"guaranteed_coupon_dates"):
             self.guar_coupon_dates=[x for x in self.guar_coupon_dates if x> start]
-            self.NC=len(self.guar_coupon_dates) if self.guar_coupon_dates else 1
+            self.NC=len(self.guar_coupon_dates) if self.guar_coupon_dates else 0
 
     def compute_funding_adjustment(self,calc_date:ql.Date):
         if self.issue_date> calc_date+ql.Period('2M'):
@@ -205,6 +206,7 @@ class Payoff :
         for key,value in dic_res.items():
             res[key]=value/len(stop_idxs)
         return res
+
 #Result and spread functions
 def organize_structure_table(contract,ZC) -> dict:
 
@@ -221,28 +223,25 @@ def organize_structure_table(contract,ZC) -> dict:
 def organize_funding_table(funding_leg,ZC:np.ndarray)-> dict:
 
     res={'Payment Dates':funding_leg.pay_dates,
-        'Model Forward':np.mean(funding_leg.fwds,axis=1),
+        'Model Forward':np.mean(funding_leg.fwds,axis=0),
         'Proba':funding_leg.proba,
         'Cash Flows': funding_leg.coupons,
         'Zero Coupon':ZC}
 
     return res
 
-def spread_interp(risky_curve,cal=ql.Thirty360(ql.Thirty360.BondBasis)) -> typing.Callable:
-    entity=risky_curve.model.entity
-    today=ql.Date.todaysDate()
-    grid=[cal.yearFraction(today,today+ql.Period(p)) for p in entity.tenors]
+def get_funding_spread_early_redemption(risky_curve,pay_dates:list[ql.Date],proba:np.ndarray,adjustment:float) ->np.ndarray:
 
-    return lambda x: np.interp(x,grid,entity.quotes,left=entity.quotes[0],right=entity.quotes[-1])
-
-def get_funding_spread_early_redemption(risky_curve,tgrid:np.ndarray,proba:np.ndarray,adjustment:float) ->np.ndarray:
+    pay_grid=[risky_curve.calendar.yearFraction(risky_curve.calc_date,d) for d in pay_dates]
     c=0.0004
-    interp_spreads=spread_interp(risky_curve)(tgrid) 
+    interp_spreads=risky_curve.funding_spread_interp(pay_grid)
     res = sum(proba*interp_spreads) - c
     return res*adjustment
 
-def get_funding_spread(risky_curve,T:float,adjustment:float):
-    return spread_interp(risky_curve)(T)*adjustment 
+def get_funding_spread(risky_curve,maturity_date:ql.Date,adjustment:float):
+
+    t_maturity=risky_curve.calendar.yearFraction(risky_curve.calc_date,maturity_date)
+    return risky_curve.funding_spread_interp(t_maturity)*adjustment 
 
 def optimize_coupon(func_to_solve:typing.Callable):
     init=0.04

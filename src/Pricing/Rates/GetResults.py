@@ -55,8 +55,7 @@ def compute_result_rate(mkt_data:dict,input:dict) -> tuple[dict]:
     if not func:
         raise ValueError(f'{func} not implemented')
 
-    prep_model=HullWhite.get_model(mkt_data,input['param']['currency'],
-                                    mkt_data['calc_date'])
+    prep_model=HullWhite.get_model(mkt_data['calc_date'],mkt_data,input['param']['currency'])
     res=func(prep_model,input['param'])
     return input,res
 

@@ -11,10 +11,12 @@ def precomputation(calc_date:ql.Date,model,data:dict[str:str]):
     data_rates=model.generate_rates(calc_date,contract.pay_dates[-1],
                        cal=ql.Thirty360(ql.Thirty360.BondBasis),Nbsimu=10000,seed=0)
     
-    contract.compute_grid(calc_date,cal=ql.Thirty360(ql.Thirty360.BondBasis))
+    contract._update(calc_date,cal=ql.Thirty360(ql.Thirty360.BondBasis))
     contract.compute_funding_adjustment(calc_date)
     dic_arg=Base.prep_undl(contract,model,data_rates,include_rates=True)
     
+    curve=model.curve
+    contract.paygrid=np.array([curve.calendar.yearFraction(calc_date,d) for d in contract.pay_dates ])
     measure_change_factor=np.array([Base.compute_measure_change_factor(model,dic_arg['rates'][i],t,contract.paygrid[-1]) 
                                         for i,t in enumerate(contract.paygrid) ])
     
@@ -27,8 +29,7 @@ def precomputation(calc_date:ql.Date,model,data:dict[str:str]):
     if contract.structure_type!='Swap':
         return res
     else:
-        dic_currency={'EUR':'3M','USD':'Overnight'}
-        funding_leg=Funding.Leg(contract,dic_currency[contract.currency])
+        funding_leg=Funding.Leg(contract,contract.currency)
         funding_leg.precomputation(calc_date,model,data_rates)
     
         res.update({'funding_leg':funding_leg})
@@ -41,38 +42,37 @@ def compute_price(dic_prep:dict,risky_curve):
     contract=dic_prep['contract']
     dic_arg=contract.update_arg_pricing(contract.coupon,dic_prep['dic_arg'])
     cashflows,stop_idxs=contract.compute_cashflows(dic_arg,include_stop_idx=True)
+    contract.proba_recall=contract.compute_recall_proba(stop_idxs)
     contract.res_coupon=np.mean(cashflows,axis=0)
 
     if contract.structure_type=="Bond":
-
-        contract.proba_recall=contract.compute_recall_proba(stop_idxs)
         contract.res_capital=Base.compute_bond_measure_change(dic_prep['measure_change_factor'],
                                                               stop_idxs)
-        ZC=risky_curve.Discount_Factor(contract.paygrid,risky=True)
-        price=sum((contract.res_coupon+contract.res_capital)*ZC)
+        zc=risky_curve.discount_factor(contract.pay_dates,risky=True)
+        price=sum((contract.res_coupon+contract.res_capital)*zc)
     
     elif contract.structure_type=="Swap":
         funding_leg=dic_prep['funding_leg']
         funding_leg.compute_values_for_early_redemption(stop_idxs,contract.funding_spread)
-        funding_ZC=risky_curve.Discount_Factor(funding_leg.paygrid,risky=False)
+        funding_ZC=risky_curve.discount_factor(funding_leg.pay_dates,risky=False)
         funding_price=sum(funding_leg.coupons*funding_ZC)
 
         res['funding_table']=Base.organize_funding_table(funding_leg,funding_ZC)
 
-        ZC=risky_curve.Discount_Factor(contract.paygrid,risky=False)
-        structure_price=sum(contract.res_coupon*ZC)
+        zc=risky_curve.discount_factor(contract.pay_dates,risky=False)
+        structure_price=sum(contract.res_coupon*zc)
 
         price=structure_price-funding_price
     
     else:
         raise ValueError(f"{contract.structure_type} not recognized")
     
-    res["table"]=Base.organize_structure_table(contract,ZC)
+    res["table"]=Base.organize_structure_table(contract,zc)
     res["price"]=price
     res["duration"]=sum(contract.proba_recall*contract.paygrid)
     res["coupon"]=contract.coupon
     res["funding_spread"]=Base.get_funding_spread_early_redemption(risky_curve,
-                                                                contract.paygrid,contract.proba_recall,
+                                                                contract.pay_dates,contract.proba_recall,
                                                                 contract.funding_adjustment)
     return res
 
@@ -100,16 +100,17 @@ class TARN(Base.Payoff):
         undl=dic_arg['undl']
         
         guaranteed_cashflows=np.zeros_like(undl.T)
-        guaranteed_cashflows[:,:self.NC+1]=self.guaranteed_coupon
-
+        if hasattr(self,"guar_coupon"):
+            guaranteed_cashflows[:,:self.NC+1]=self.guar_coupon
+        
         cdt_cashflows=Base.compute_cdt_digit(undl,self.coupon_lvl,
                              self.infine,self.memory)*coupon
-        cdt_cashflows[:,:self.NC+1]=False
+        cdt_cashflows[:,:self.NC]=False
         
         cashflows=guaranteed_cashflows+cdt_cashflows
 
         autocall_cdt=(np.cumsum(cashflows,axis=1) >=self.target )
-        stop_idxs=[Functions.first_occ(np.array(x),True) for x in autocall_cdt]
+        stop_idxs=Functions.first_occ_vec(autocall_cdt, True)
 
         if include_stop_idx:
             return Base.adjust_to_stop_idxs(cashflows,stop_idxs,self.infine),stop_idxs

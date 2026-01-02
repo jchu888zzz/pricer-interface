@@ -12,11 +12,13 @@ def precomputation(calc_date:ql.Date,model,data:dict[str:str]):
     data_rates=model.generate_rates(calc_date,contract.pay_dates[-1],
                        cal=ql.Thirty360(ql.Thirty360.BondBasis),Nbsimu=10000,seed=0)
     
-    contract.compute_grid(calc_date,cal=ql.Thirty360(ql.Thirty360.BondBasis))
+    contract._update(calc_date,cal=ql.Thirty360(ql.Thirty360.BondBasis))
     contract.compute_funding_adjustment(calc_date)
     dic_arg=Base.prep_undl(contract,model,data_rates,include_rates=True)
     stop_idxs=contract.compute_stop_idxs(dic_arg['undl'])
     
+    calendar=model.curve.calendar
+    contract.paygrid=np.array([calendar.yearFraction(calc_date,d) for d in contract.pay_dates])
     measure_change_factor=np.array([Base.compute_measure_change_factor(model,dic_arg['rates'][i],t,contract.paygrid[-1]) 
                                         for i,t in enumerate(contract.paygrid) ])
     
@@ -32,8 +34,7 @@ def precomputation(calc_date:ql.Date,model,data:dict[str:str]):
     if contract.structure_type!='Swap':
         return res
     else:
-        dic_currency={'EUR':'3M','USD':'Overnight'}
-        funding_leg=Funding.Leg(contract,dic_currency[contract.currency])
+        funding_leg=Funding.Leg(contract,contract.currency)
         funding_leg.precomputation(calc_date,model,data_rates)
     
         res.update({'funding_leg':funding_leg})
@@ -50,29 +51,29 @@ def compute_price(dic_prep:dict,risky_curve):
     contract.res_coupon=np.mean(cashflows,axis=0)
     
     if contract.structure_type=="Bond":
-        ZC=risky_curve.Discount_Factor(contract.paygrid,risky=True)
-        price=sum((contract.res_coupon+contract.res_capital)*ZC)
+        zc=risky_curve.discount_factor(contract.pay_dates,risky=True)
+        price=sum((contract.res_coupon+contract.res_capital)*zc)
     
     elif contract.structure_type=="Swap":
         funding_leg=dic_prep['funding_leg']
-        funding_ZC=risky_curve.Discount_Factor(funding_leg.paygrid,risky=False)
+        funding_ZC=risky_curve.discount_factor(funding_leg.pay_dates,risky=False)
         funding_leg.compute_values_for_early_redemption(dic_arg['stop_idxs'],contract.funding_spread)
         funding_price=sum(funding_leg.coupons*funding_ZC)
 
-        ZC=risky_curve.Discount_Factor(contract.paygrid,risky=False)
-        structure_price=sum(contract.res_coupon*ZC)
+        zc=risky_curve.discount_factor(contract.pay_dates,risky=False)
+        structure_price=sum(contract.res_coupon*zc)
         
         price=structure_price-funding_price
         res['funding_table']=Base.organize_funding_table(funding_leg,funding_ZC)
     else:
         raise ValueError(f"{contract.structure_type} not recognized")
 
-    res["table"]=Base.organize_structure_table(contract,ZC)
+    res["table"]=Base.organize_structure_table(contract,zc)
     res["price"]=price
     res["duration"]=contract.duration
     res["coupon"]=contract.coupon
     res["funding_spread"]=Base.get_funding_spread_early_redemption(risky_curve,
-                                                                contract.paygrid,contract.proba_recall,
+                                                                contract.pay_dates,contract.proba_recall,
                                                                 contract.funding_adjustment)
     return res
 
@@ -81,32 +82,32 @@ def solve_coupon(dic_prep:dict,risky_curve):
     contract=dic_prep['contract']
     target=contract.UF+contract.yearly_buffer*contract.paygrid[-1]
     res_funding=Base.get_funding_spread_early_redemption(risky_curve,
-                                                        contract.paygrid,contract.proba_recall,
+                                                        contract.pay_dates,contract.proba_recall,
                                                         contract.funding_adjustment)
 
     if contract.structure_type=="Bond":
-        ZC=risky_curve.Discount_Factor(contract.paygrid,risky=True)
+        zc=risky_curve.discount_factor(contract.pay_dates,risky=True)
         def func_to_solve(x:float):
             dic_arg=contract.update_arg_pricing(x,dic_prep['dic_arg']) 
             cashflows=contract.compute_cashflows(dic_arg)
             coupons=np.mean(cashflows,axis=0)
-            return (sum((coupons+contract.res_capital)*ZC) - (1-target))**2
+            return (sum((coupons+contract.res_capital)*zc) - (1-target))**2
 
         res_coupon=Base.optimize_coupon(func_to_solve)
         return res_coupon,res_funding
     
     if contract.structure_type=="Swap":
         funding_leg=dic_prep['funding_leg']
-        funding_ZC=risky_curve.Discount_Factor(funding_leg.paygrid,risky=False)
+        funding_zc=risky_curve.discount_factor(funding_leg.pay_dates,risky=False)
         funding_leg.compute_values_for_early_redemption(dic_prep['dic_arg']['stop_idxs'],res_funding)
-        funding_price=sum(funding_leg.coupons*funding_ZC)
+        funding_price=sum(funding_leg.coupons*funding_zc)
 
-        ZC=risky_curve.Discount_Factor(contract.paygrid,risky=False)
+        zc=risky_curve.Discount_Factor(contract.pay_dates,risky=False)
         def func_to_solve(x:float):
             dic_arg=contract.update_arg_pricing(x,dic_prep['dic_arg']) 
             cashflows=contract.compute_cashflows(dic_arg)
             res_coupon=np.mean(cashflows,axis=0)
-            structure_price=sum(res_coupon*ZC)
+            structure_price=sum(res_coupon*zc)
             return (structure_price-funding_price +target)**2        
         
         res_coupon=Base.optimize_coupon(func_to_solve)
@@ -152,9 +153,10 @@ class Autocall(Base.Payoff):
     def compute_stop_idxs(self,undl:np.ndarray) -> list:
         """ undl shape (nb time steps, nb simu)"""
         autocall_cdt=(undl.T <=self.autocall_lvl)
-        autocall_cdt[:,:self.call_idxs[0]]=0 # set period before call to 0
-        return [Functions.first_occ(x,True) for x in autocall_cdt]
-        
+        non_call=len(self.fix_dates) -(len(self.call_dates)+1)
+        autocall_cdt[:,:non_call]=0 # set period before call to 0
+        return Functions.first_occ_vec(autocall_cdt, True) 
+    
     def compute_cashflows(self,dic_arg:dict) -> np.ndarray:
         """ dic_arg must contain necessary arguments for pricing cashflows """
         coupon=dic_arg['x']

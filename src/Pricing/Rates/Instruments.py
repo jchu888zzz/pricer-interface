@@ -26,168 +26,55 @@ class Swaption:
         self.float_freq=parameters[4]
         self.fix_freq=parameters[5]
         self.strike_type=parameters[6]
-        if self.strike_type=='from_ATM':
-            self.strike_shift=parameters[7]
+        self.strike_shift=parameters[7]
         
     def __repr__(self):
-        return f'Swaption (Expiry:{self.expiry},Tenor:{self.tenor},striketype:{self.strike_type + self.strike_shift},quote:{self.vol})'
+        if self.strike_type=='from_ATM':
+            striketype=' '.join([self.strike_type,str(self.strike_shift)])
+        else:
+            striketype=self.strike_type
+        return f'Swaption (Expiry:{self.expiry},Tenor:{self.tenor},striketype:{striketype},quote:{self.vol})'
     
-    def get_strike(self,striketype,shift):
-        LVL=np.sum(self.ZC[1:]*self.delta)
-        ATM=(self.ZC[0]-self.ZC[-1])/LVL
-        if striketype=='ATM':
-            K=ATM
-        if striketype=='from_ATM':
-            K=ATM+float(shift)
-        return K
-    
-    def get_timegrid(self,calc_date:ql.Date):
+    def compute_mkt_price(self,calc_date:ql.Date,curve:Curve,daycount_calendar=ql.Thirty360(ql.Thirty360.BondBasis)):
         
-        start_date=calc_date + ql.Period(self.Expiry)
-        end_date=start_date + ql.Period(self.Term)
-        schedule=ql.MakeSchedule(start_date,end_date,self.frequency)
-        dates=[dt for dt in schedule]
-        delta=[ql.Thirty360(ql.Thirty360.BondBasis).yearFraction(calc_date,y) for y in dates]
-        
-        return np.array(delta)
-    
-    
-    def price_mkt(self,calc_date:ql.Date,curve:Curve,calendar=ql.Thirty360(ql.Thirty360.BondBasis)):
-        
-        start_date=calc_date + ql.Period(self.Expiry)
-        end_date=start_date + ql.Period(self.Term)
-        schedule=list(ql.MakeSchedule(start_date,end_date,ql.Period(self.frequency)))
+        start_date=calc_date + ql.Period(self.expiry)
+        end_date=start_date + ql.Period(self.tenor)
+        schedule=list(ql.MakeSchedule(start_date,end_date,ql.Period(self.float_freq)))
+        tgrid=np.array([daycount_calendar.yearFraction(calc_date,x) for x in schedule])
+        delta=np.array([x-y for x,y in zip(tgrid[1:],tgrid)])
+        zc=curve.discount_factor(schedule)
         #Compute strike
-        K=curve.forward_swap_rate(self,[start_date],self.tenor,
-                            self.fix_freq,self.float_freq)
+        strike=curve.forward_swap_rate(start_date,self.tenor,self.fix_freq,self.float_freq)
         
         if self.strike_type=='from_ATM':
-            K+=float(self.strike_shift)
+            strike+=float(self.strike_shift)
         
-        fwd=curve.forward_swap_rate([start_date],self.tenor)
+        fwd=curve.forward_swap_rate(start_date,self.tenor,self.fix_freq,self.float_freq)
         
-        t=calendar.yearFraction(calc_date,start_date)
+        t=curve.calendar.yearFraction(calc_date,start_date)
         vol_=self.vol*np.sqrt(t)
-        
+
+        #Retrieve param to compute theorical price
+        self.ZC=zc
+        self.delta=delta
+        self.K=strike
+        self.tgrid=tgrid
+
         if (self.typequote== 'normal_vol'):
-            k=(fwd-self.K)/vol_    
-            res=np.sum(self.ZC[1:]*self.delta)*vol_*(np.exp(-0.5*k**2)/np.sqrt(2*np.pi)  + k*norm.cdf(k))*10000
+            k=(fwd-strike)/vol_    
+            self.mkt_price=np.sum(zc[1:]*delta)*vol_*(np.exp(-0.5*k**2)/np.sqrt(2*np.pi)  + k*norm.cdf(k))*10000
         else:
             d1,d2=0.5*vol_,-0.5*vol_            
-            res=np.sum(self.ZC[1:]*self.delta)*self.K*(norm.cdf(d1)-norm.cdf(d2))*10000
-        return res
+            self.mkt_price=np.sum(zc[1:]*delta)*strike*(norm.cdf(d1)-norm.cdf(d2))*10000
 
-class Cap:
-    
-    def __init__(self,parameters:tuple,Curve,calc_date:ql.Date):
-        self.vol,self.Tenor,self.Maturity=parameters[0],parameters[1],parameters[2] #Vol quote en  %
-        self.typequote=parameters[3]
-        self.frequency=ql.Period(self.Tenor)
-        self.timegrid=self.get_timegrid(calc_date)
-        self.T=ql.Thirty360(ql.Thirty360.BondBasis).yearFraction(calc_date,calc_date+ql.Period(self.Maturity))
-        self.Forward_Swap_rate=Curve.Forward_Swap_rate
-        self.ZC,self.delta=Curve.Discount_Factor(self.timegrid),np.array([x-y for x,y in zip(self.timegrid[1:],self.timegrid)])
-        self.K=self.get_strike(parameters[4])
-        self.price=self.price_mkt()
-
-    def __repr__(self):
-        
-        return f'Cap (Tenor:{self.Tenor},T:{self.T},Strike:{truncate(self.K,3)},quote:{self.vol},price:{truncate(self.price,2)})'
-    
-    def get_strike(self,strike:str):
-        if strike=='ATM':
-            LVL=np.sum(self.ZC[1:]*self.delta)
-            K=(self.ZC[0]-self.ZC[-1])/LVL
-        else:
-            K=float(strike)
-        return K
-    
-    def get_timegrid(self,calc_date:ql.Date):
-        start_date=calc_date + self.frequency
-        end_date=start_date + ql.Period(self.Maturity)
-        schedule=ql.MakeSchedule(start_date,end_date,self.frequency)
-        dates=[dt for dt in schedule]
-        delta=[ql.Thirty360(ql.Thirty360.BondBasis).yearFraction(calc_date,y) for y in dates[:-1]]
-        return np.array(delta)
-    
-    def price_mkt(self):
-        
-        ZC_ratio=np.array([(x-y)/y for x,y in zip(self.ZC,self.ZC[1:])])
-        L=ZC_ratio/self.delta
-        
-        if (self.typequote== 'normal_vol'):
-            k=(L-self.K)/(self.vol*np.sqrt(self.timegrid[1:]))
-            res=self.vol*np.sum(self.ZC[1:]*np.sqrt(self.timegrid[1:])*self.delta*(np.exp(-0.5*k**2)/np.sqrt(2*np.pi) + k*norm.cdf(k)))*10000
-        
-        else:
-            vol_=self.vol*np.sqrt(self.timegrid[1:]) #  Quote en %.
-            d1,d2=(np.log(L/self.K) + 0.5*vol_**2)/vol_,(np.log(L/self.K) -0.5*vol_**2)/vol_
-            Caplets=L*norm.cdf(d1) - self.K*norm.cdf(d2)
-            res=np.sum(self.ZC[1:]*self.delta*Caplets)*10000
-        
-        return res
-    
-class Straddle:
-
-    def __init__(self,parameters,Curve,calc_date):
-        self.vol,self.Expiry,self.Term=parameters[0],parameters[1],parameters[2] #Vol quote en  %
-        self.typequote=parameters[3]
-        self.frequency=ql.Period(parameters[4])
-        self.timegrid=self.get_timegrid(calc_date)
-        self.t=ql.Thirty360(ql.Thirty360.BondBasis).yearFraction(calc_date,calc_date+ql.Period(self.Expiry))
-        self.T=ql.Thirty360(ql.Thirty360.BondBasis).yearFraction(calc_date,calc_date+ql.Period(self.Term))
-        self.Forward_Swap_rate=Curve.Forward_Swap_rate
-        self.ZC,self.delta=Curve.Discount_Factor(self.timegrid),np.array([x-y for x,y in zip(self.timegrid[1:],self.timegrid)])
-        self.striketype=parameters[5]
-        self.K=self.get_strike(parameters[5],parameters[6])
-        self.price=self.price_mkt()
-    
-    def __repr__(self):
-        return f'Straddle (Expiry:{self.Expiry},T:{self.T},Strike:{truncate(self.K,3)},quote:{self.vol},price:{truncate(self.price,2)})'
-
-    def get_strike(self,striketype,shift):
-        LVL=np.sum(self.ZC[1:]*self.delta)
-        ATM=(self.ZC[0]-self.ZC[-1])/LVL
-        if striketype=='ATM':
-            K=ATM
-        if striketype=='from_ATM':
-            K=ATM+float(shift)
-        return K
-    
-    def get_timegrid(self,calc_date):
-        
-        start_date=calc_date + ql.Period(self.Expiry)
-        end_date=start_date + ql.Period(self.Term)
-        schedule=ql.MakeSchedule(start_date,end_date,self.frequency)
-        dates=[dt for dt in schedule]
-        delta=[ql.Thirty360(ql.Thirty360.BondBasis).yearFraction(calc_date,y) for y in dates]
-        return np.array(delta)
-    
-    def price_mkt(self):
-        
-        f=self.Forward_Swap_rate(self.t,self.T)
-        vol_=self.vol*np.sqrt(self.t)
-        
-        if (self.typequote== 'normal_vol'):
-            k=(f-self.K)/vol_    
-            call=np.sum(self.ZC[1:]*self.delta)*vol_*(np.exp(-0.5*k**2)/np.sqrt(2*np.pi)  + k*norm.cdf(k))*10000
-            put=np.sum(self.ZC[1:]*self.delta)*vol_*(np.exp(-0.5*k**2)/np.sqrt(2*np.pi)  - k*norm.cdf(-k))*10000
-        else:
-            d1,d2=0.5*vol_,-0.5*vol_            
-            call=np.sum(self.ZC[1:]*self.delta)*self.K*(norm.cdf(d1)-norm.cdf(d2))*10000
-            put=np.sum(self.ZC[1:]*self.delta)*self.K*(norm.cdf(-d2)-norm.cdf(-d1))*10000
-        
-        return call+put
-
-#Récupérer les quotes à partir d'une chaîne de caractère pour les caps et swaptions
-def get_swaptions(df:pd.DataFrame,Curve,calc_date:ql.Date,currency:str) -> tuple[Swaption]:
+_DIC_FREQ_SWAPTION={'USD':{'fix_freq':'6M','float_freq':'3M'},
+                'EUR':{'fix_freq':'1Y','float_freq':'6M'}}
+def select_and_prepare_swaptions(df:pd.DataFrame,curve,calc_date:ql.Date,currency:str) -> tuple[Swaption]:
     
     mask=df.Description.str.contains(currency and 'Swaption')
-    dic_freq={'USD':{'fix_freq':'6M','float_leg':'3M'},
-                'EUR':{'fix_freq':'1Y','float_leg':'6M'}}
-
-    def convert_element(x):
-        name,quote=x[0].split(),x[1]
+    
+    def make_swaption(item):
+        name,quote=item[0].split(),item[1]
         t_indicator=[x for x in name if any(y.isdigit()==True for y in x)]
         expiry,maturity=t_indicator[0],t_indicator[1]
 
@@ -202,18 +89,68 @@ def get_swaptions(df:pd.DataFrame,Curve,calc_date:ql.Date,currency:str) -> tuple
             type_quote='normal_vol'
         else :
             type_quote='vol'
-        param=(quote,expiry,maturity,type_quote,dic_freq[currency]['fix_freq'],
-                dic_freq[currency]['float_freq'],striketype,strike_shift)
-
-        return Swaption(param,Curve,calc_date)
+        param=(quote,expiry,maturity,type_quote,_DIC_FREQ_SWAPTION[currency]['float_freq'],
+                _DIC_FREQ_SWAPTION[currency]['fix_freq'],striketype,strike_shift)
+        res=Swaption(param)
+        res.compute_mkt_price(calc_date,curve)
+        return res
     
-    return tuple([convert_element(x) for x in df[mask].to_numpy()]) 
+    return tuple([make_swaption(x) for x in df[mask].to_numpy()])      
+
+class Cap:
+    
+    def __init__(self,parameters:tuple):
+        self.vol,self.tenor,self.maturity=parameters[0],parameters[1],parameters[2] #Vol quote en  %
+        self.typequote=parameters[3]
+        self.frequency=self.tenor
+        self.strike=parameters[4]
+
+    def __repr__(self):
+        return f'Cap (Tenor:{self.tenor},Maturity:{self.maturity},Strike:{self.strike},quote:{self.vol})'
+    
+    def compute_mkt_price(self,calc_date:ql.Date,curve:Curve,daycount_calendar=ql.Thirty360(ql.Thirty360.BondBasis)):
         
-def get_caps(df:pd.DataFrame,Curve,calc_date:ql.Date,currency:str) ->tuple[Cap]:
+        start_date=calc_date + ql.Period(self.frequency)
+        end_date=start_date + ql.Period(self.maturity)
+        schedule=list(ql.MakeSchedule(start_date,end_date,ql.Period(self.frequency)))[1:]
+        zc=curve.discount_factor(schedule)
+
+        tgrid=np.array([daycount_calendar.yearFraction(calc_date,y) for y in schedule])
+        delta=np.array([x-y for x,y in zip(tgrid[1:],tgrid)])
+
+        #compute strike
+        if self.strike=='ATM':
+            lvl=np.sum(zc[1:]*delta)
+            strike=(zc[0]-zc[-1])/lvl
+        else:
+            strike=float(self.strike)
+
+        ZC_ratio=np.array([(x-y)/y for x,y in zip(zc,zc[1:])])
+        L_ratio=ZC_ratio/delta
+        #Quote en %.
+        vol_=(self.vol*np.sqrt(tgrid[1:]))
+
+         #Retrieve param to compute theorical price
+        self.ZC=zc
+        self.delta=delta
+        self.K=strike
+        self.tgrid=tgrid
+
+        if (self.typequote== 'normal_vol'):
+            k=(L_ratio-strike)/vol_
+            self.mkt_price=self.vol*np.sum(zc[1:]*np.sqrt(tgrid[1:])*delta*(np.exp(-0.5*k**2)/np.sqrt(2*np.pi) + k*norm.cdf(k)))*10000
+        
+        else:
+            d1=(np.log(L_ratio/strike) + 0.5*vol_**2)/vol_
+            d2=d1-vol_
+            Caplets=L_ratio*norm.cdf(d1) - strike*norm.cdf(d2)
+            self.mkt_price=np.sum(zc[1:]*delta*Caplets)*10000
+        
+def select_and_prepare_caps(df:pd.DataFrame,curve,calc_date:ql.Date,currency:str) ->tuple[Cap]:
     
     mask=df.Description.str.contains(currency and 'Cap')
     
-    def convert_element(x):
+    def make_cap(x):
         name,quote=x[0].split(),x[1]
         t_indicator=[x for x in name if any(y.isdigit()==True for y in x)]
         tenor,maturity=t_indicator[0],t_indicator[1]
@@ -222,33 +159,10 @@ def get_caps(df:pd.DataFrame,Curve,calc_date:ql.Date,currency:str) ->tuple[Cap]:
             type_quote='normal_vol'
         else :
             type_quote='vol'
-    
         param=(quote,tenor,maturity,type_quote,strike)
-        return Cap(param,Curve,calc_date)
+        res=Cap(param)
+        res.compute_mkt_price(calc_date,curve)
+        return res
     
-    return tuple([convert_element(x) for x in df[mask].to_numpy()]) 
+    return tuple([make_cap(x) for x in df[mask].to_numpy()]) 
 
-#Groupby Functions
-def groupby_maturity(items,key):
-    dic_type={'Cap':Cap,'Swaption':Swaption}
-    Instruments_=[x for x in items if type(x)==dic_type[key]]
-    Maturities=set([x.T for x in Instruments_])
-    res={k:[] for k in Maturities}
-    
-    for x in Instruments_:
-        key=x.T
-        res[key].append(x)
-    
-    return res
-
-def groupby_expiry(items,key):
-    dic_type={'Cap':Cap,'Swaption':Swaption,'SpreadOption':CMSSpreadOption}
-    items=[x for x in items if type(x)==dic_type[key]]
-    Maturities=set([x.Expiry for x in items])
-    res={k:[] for k in Maturities}
-    
-    for x in items:
-        key=x.Expiry
-        res[key].append(x)
-    
-    return res
