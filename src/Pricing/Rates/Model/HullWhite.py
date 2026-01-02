@@ -245,11 +245,10 @@ class HW :
 
         fix_dates=contract.fix_dates
         call_dates=contract.call_dates
-        maturity_date=contract.pay_dates[-1]
+        t_maturity=self.curve.calendar.yearFraction(self.curve.calc_date,contract.pay_dates[-1])
         currency=contract.currency
         fix_freq=_DIC_FREQ_SWAPTION[currency]["delta_fix"]
         float_freq=_DIC_FREQ_SWAPTION[currency]["delta_float"]
-
 
         rates=select_rates(data_rates['rates'],data_rates['schedule'],fix_dates,None)
         res_delta=[None]*len(call_dates)
@@ -261,20 +260,18 @@ class HW :
 
         for i,d in enumerate(call_dates):
             idx=Functions.find_idx(fix_dates,d)
-            t=daycount_calendar(calc_date,d)
-            fix_schedule= list(ql.MakeSchedule(fix_dates[idx],maturity_date,ql.Period(fix_freq)))
-            fix_tgrid=np.array([daycount_calendar.yearFraction(calc_date,x) for x in fix_schedule])
+            t=daycount_calendar.yearFraction(calc_date,d)
+            fix_tgrid=t+np.arange(0,t_maturity,fix_freq)
             P_fix=self.compute_discount_factor_from_rates(rates[idx],t,fix_tgrid)
             delta=np.array([x-y for x,y in zip(fix_tgrid[1:],fix_tgrid)])
-            lvl=np.sum(P_fix[1:]*delta,axis=1)
+            lvl=np.sum(P_fix[:,1:]*delta,axis=1)
             
-            float_schedule= list(ql.MakeSchedule(fix_dates[idx],maturity_date,ql.Period(float_freq)))
-            float_tgrid=np.array([daycount_calendar.yearFraction(calc_date,x) for x in float_schedule])
+            float_tgrid=t+np.arange(0,t_maturity,float_freq)
             P_float=self.compute_discount_factor_from_rates(rates[idx],t,float_tgrid)
             swap_values=(P_float[:,0]-P_float[:,-1])/lvl
             
             res_delta[i]=delta
-            res_Pt_T[i]=P_float
+            res_Pt_T[i]=P_fix
             res_swap[i]=swap_values
             res_DF[i]=self.DF(t)
 

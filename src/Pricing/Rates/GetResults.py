@@ -4,7 +4,7 @@ from Pricing.Utilities import Dates,Data_File
 import pandas as pd
 
 from .Payoffs.Autocallable import TARN, Autocall
-from .Payoffs.Callable import Digit, FixedRate,RangeAccrual
+from .Payoffs.Callable import Digit, FixedRate,RangeAccrual,MinMax
 from .Model import HullWhiteCMT,HullWhite
 
 #Data Preparation
@@ -41,7 +41,8 @@ def compute_result_rate(mkt_data:dict,input:dict) -> tuple[dict]:
                     'Tarn':TARN.Process.compute_price,
                     'Digit':Digit.Process.compute_price,
                     'RangeAccrual':RangeAccrual.Process.compute_price,
-                    'FixedRate':FixedRate.Process.compute_price},
+                    'FixedRate':FixedRate.Process.compute_price,
+                    'MinMax':MinMax.Process.compute_price},
 
                     "Solve coupon":{'Autocall':Autocall.Process.solve_coupon,
                     'Digit':Digit.Process.solve_coupon,
@@ -64,7 +65,10 @@ def compute_result_cmt(mkt_data:dict,input:dict) ->tuple[dict]:
     OPTION_MAPPING={"Price":{'Autocall':Autocall.Process.compute_price,
                     'Tarn':TARN.Process.compute_price,
                     'Digit':Digit.Process.compute_price,
-                    'RangeAccrual':RangeAccrual.Process.compute_price},
+                    'RangeAccrual':RangeAccrual.Process.compute_price,
+                    'MinMax':MinMax.MinMax.compute_price,
+                    'FixedRate':MinMax.MinMax.compute_price},
+                    
 
                     "Solve coupon":{'Autocall':Autocall.Process.solve_coupon,
                     'Digit':Digit.Process.solve_coupon,

@@ -16,7 +16,7 @@ DataPath =r"C:\Users\jorda\OneDrive\Documents\pricer_interface-main\snapshot"
 calc_date=ql.Date(11,11,2025)
 mkt_data=GetResults.retrieve_data(path_folder=DataPath,date=calc_date)
 #select test from contracts
-input=test_range_swap
+input=test_fixed_swap
 
 input,res=GetResults.compute_result_rate(mkt_data,input)
 Display.display_pricing_results(res)
