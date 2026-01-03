@@ -1,5 +1,6 @@
 import numpy as np
 
+from scipy.interpolate import CubicSpline
 from scipy.special import ndtr  # Step 9: Faster than norm.cdf for arrays
 from scipy.optimize import brentq,least_squares,newton
 import QuantLib as ql
@@ -17,19 +18,23 @@ from Pricing.Curves import Classic
 _DIC_FREQ_SWAPTION={"EUR":{"delta_fix":1,"delta_float":0.5},
                     "USD":{"delta_fix":0.5,"delta_float":0.25}}
 
-def get_model(calc_date:ql.Date,mkt_data:dict,currency:str,option='swaption') -> dict:
-    calc_date=ql.Date.todaysDate()
-    curve,risky_curve=Classic.get_curves(calc_date,mkt_data,currency)
+def get_model(calc_date:ql.Date,mkt_data:dict,currency:str,undl:str|None) -> dict:
 
-    if option=='swaption':
+    curve,risky_curve=Classic.get_curves(calc_date,mkt_data,currency,'Classical')
+    if undl:
+        _,rate_type,tenor=undl.split()
+        if rate_type=='CMS':
+            instruments=Rate_Instruments.select_and_prepare_swaptions(mkt_data['swaption'],
+                                            curve,calc_date,currency)
+            instruments=[x for x in instruments if x.strike_type=='ATM' and x.tenor==tenor]
+        elif rate_type=='Euribor':
+            instruments=Rate_Instruments.select_and_prepare_caps(mkt_data['caps'],curve,calc_date,currency)
+        else:
+            raise ValueError(f"{undl} not implemented")
+    else:
         instruments=Rate_Instruments.select_and_prepare_swaptions(mkt_data['swaption'],
                                             curve,calc_date,currency)
         instruments=[x for x in instruments if x.strike_type=='ATM']
-    elif option=="cap":
-        instruments=Rate_Instruments.select_and_prepare_caps(mkt_data['caps'],curve,calc_date,currency)
-    else:
-        raise ValueError(f"{option} not implemented")
-
     model=Calibration(curve,instruments)
     return {'risky_curve':risky_curve,
             'curve':curve,
@@ -70,7 +75,11 @@ def Calibration(curve,instru_calib:list[Rate_Instruments.Swaption | Rate_Instrum
 
     optimizer=least_squares(error_function,x0=(0.02,0.02),bounds=([1e-5,1e-3],[0.5,np.sqrt(0.1)]))
 
-    return HW(curve,optimizer.x)
+    model=HW(curve,optimizer.x)
+    if Swaptions:
+        model.cvx_adj_helper=CA.Helper(curve,Swaptions)
+
+    return model
 
 def select_rates(rates:np.ndarray,simu_dates:np.ndarray[ql.Date],fix_dates:np.ndarray[ql.Date],
                 nb_sub_fix_points:None| int) -> np.ndarray:
@@ -91,13 +100,14 @@ class HW :
         #Forward and DF are interpolation function
         self.curve=curve
         self.DF=curve.discount_factor_from_times
+        #self.DF=CubicSpline(curve.tgrid,curve.value)
         self.a,self.sigma=param[0],param[1]
         
     def __repr__(self):
         return f'HW(a:{self.a},sigma:{self.sigma})'
     
     #Smoother instantaneous forward rate
-    def instantaneous_f(self,t,h=0.01):
+    def instantaneous_f(self,t,h=0.05):
         res=-(np.log(self.DF(t+h))-np.log(self.DF(t)))/h
         return res
     
@@ -171,8 +181,8 @@ class HW :
         
         alpha,Var=[self.alpha_T(t,T) for t in grid ],[self.var_(t) for t in grid]
         res=np.zeros((Nb_simu,len(grid)))
-        initial_t=0.01
-        res[:,0]=-(np.log(self.DF(initial_t))-np.log(self.DF(0)))/initial_t
+        initial_t=0.05
+        res[:,0]=self.instantaneous_f(0,initial_t)
 
         for i in range(1,len(grid)):
             h=grid[i]-grid[i-1]
@@ -196,9 +206,8 @@ class HW :
         P_term=self.compute_discount_factor_from_rates(rates,t,t+h)
         return (1-P_term)/(P_term*h)
     
-    
-
-    def compute_cms_from_rates(self,rates:np.ndarray,t:float,tenor:str,delta_fix:float,delta_float:float) -> np.ndarray:
+    def compute_cms_from_rates(self,rates:np.ndarray,t:float,tenor:str,
+                               delta_fix:float,delta_float:float) -> np.ndarray:
         tenor=convert_period(tenor)
         fix_tgrid=t+np.arange(0,tenor,delta_fix)
         P_fix=self.compute_discount_factor_from_rates(rates,t,fix_tgrid)
@@ -209,13 +218,14 @@ class HW :
         # float_tgrid=t+np.arange(0,tenor,delta_float)
         # P_float=self.compute_discount_factor_from_rates(rates,t,float_tgrid)
         # res=(P_float[:,0]-P_float[:,-1])/lvl
+        res+=self.cvx_adj_helper.compute_adjustment(t,tenor='10Y')
         return res
     
     #wrapper to select rates
     def select_rates(self,data_rates:dict,fix_dates:list[ql.Date]) -> np.ndarray:
         return select_rates(data_rates['rates'],data_rates['schedule'],fix_dates)
     
-    def compute_single_undl_from_rates(self,data_rates:dict,fix_dates:list[ql.Date],undl1:str,include_rates=True) ->tuple[np.ndarray]:
+    def compute_single_undl_from_rates(self,data_rates:dict,fix_dates:list[ql.Date],undl1:str,include_rates=True) ->dict:
         """ result shape (len(fixgrid),nb simu)"""
         cur1,rate_type1,tenor1=undl1.split()
         rates=select_rates(data_rates['rates'],data_rates['schedule'],fix_dates,None)
@@ -235,7 +245,7 @@ class HW :
             return {'undl':undl,'nbsimu':rates.shape[1],'rates':rates}
     
     def compute_single_undl_from_rates_with_depth(self,data_rates:dict,fix_dates:list[ql.Date],undl1:str,nb_sub_fix_points:int,
-                                                    include_rates=True)->np.ndarray:
+                                                    include_rates=True)->dict:
         """ result shape (len(fixgrid),fixing_depth,nb simu)"""
         cur1,rate_type1,tenor1=undl1.split()
         rates=select_rates(data_rates['rates'],data_rates['schedule'],fix_dates,nb_sub_fix_points)

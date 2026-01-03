@@ -7,9 +7,16 @@ from scipy.interpolate import CubicSpline
 from Pricing.Utilities import Data_File,InputConverter
 from Pricing.Curves import Classic
 
+def get_curve(calc_date:ql.Date,df:dict,currency:str,tag:str):
+    instruments=sort_and_select_instruments(calc_date,df,currency,tag)
+    res=Curve(calc_date,currency,instruments)
+    res.retrieve_interp(calc_date,df,tag)
+    return res
+
+
 class Curve(Classic.Curve):
-    def __init__(self,calc_date:ql.Date,cur_name:str,instruments:list):
-        super().__init__(calc_date,cur_name,instruments)
+    def __init__(self,calc_date:ql.Date,currency:str,instruments:list):
+        super().__init__(calc_date,currency,instruments)
 
     def retrieve_interp(self,calc_date:ql.Date,df:pd.DataFrame,tag:str):
 
@@ -31,30 +38,23 @@ class Curve(Classic.Curve):
     #     fwd_adjusted=fwd(self.interp_cmt,self.interp_ois,repo_spread,t,T,cx_adj=0.0005)
     #     return fwd_adjusted
     
-    def forward_cms(self,dates:list[ql.Date],tenor:str='10Y',option:str='adjusted'):
-        
+    def forward_cms(self,t:float,tenor:str='10Y',option:str='adjusted') ->np.ndarray:
+        tenor=InputConverter.convert_period(tenor)
+        fixgrid=t + np.arange(0,tenor,1)
         if option=='unadjusted':
-            res=np.zeros(len(dates))
-            for i,d in enumerate(dates):
-                start=d+ql.Period('2D')
-                schedule= list(ql.MakeSchedule(start,start+ql.Period(tenor),ql.Period('1Y')))[1:]
-                zc=self.discount_factor(schedule)
-                res[i]=(zc[0]-zc[-1])/np.sum(zc[1:])
-        
+            zc=self.discount_factor_from_times(fixgrid)
+            res=(zc[0]-zc[-1])/np.sum(zc[1:])
             return res
         
         if option=='adjusted':
             repo_spread=0.001
-            cx_adj=0.0005
-            Tenor=InputConverter.convert_period(tenor)
-            tgrid=[self.calendar.yearFraction(self.calc_date,d) for d in dates]    
-            res=np.array([fwd(self.interp_cmt,self.interp_ois,repo_spread,t,Tenor,cx_adj)
-                            for t in tgrid])
+            cx_adj=0.0005 
+            res=fwd(self.interp_cmt,self.interp_ois,repo_spread,t,tenor,cx_adj)              
             return res
         
         raise ValueError(f'{option} not implemented')
 
-def sort_and_select_instruments(calc_date:ql.Date,df:pd.DataFrame,tag=str)-> list:
+def sort_and_select_instruments(calc_date:ql.Date,df:pd.DataFrame,currency:str,tag=str)-> list:
 
     res=[]
 
@@ -79,8 +79,8 @@ def sort_and_select_instruments(calc_date:ql.Date,df:pd.DataFrame,tag=str)-> lis
                                                 res.maturity_date,ql.Period(float_freq)))[1:]
         return res
 
-    mask_deposit=Data_File.select_row_from_keywords(df,'Description',keywords=('EUR','Deposit'))
-    mask_swap=Data_File.select_row_from_keywords(df,'Description',keywords=('EUR','Basis_swap',tag))
+    mask_deposit=Data_File.select_row_from_keywords(df,'Description',keywords=(currency,'Deposit'))
+    mask_swap=Data_File.select_row_from_keywords(df,'Description',keywords=(currency,'Basis_swap',tag))
     
     deposits=list(map(make_deposit,df[mask_deposit].to_numpy()))
     if deposits:

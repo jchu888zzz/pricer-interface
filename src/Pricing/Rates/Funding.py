@@ -58,7 +58,7 @@ class Leg:
                 start_date=end_date
                 start_idx=end_idx
 
-        elif self.type_rate=='3M':            
+        elif self.type_rate=='3M':         
             idxs=Functions.find_idx(schedule,self.fix_dates)
             self.fwds=model.compute_deposit_from_rates(rates[:,idxs],fixgrid,'3M')
             #Set first value to spot to avoid numerical approximation at beginning

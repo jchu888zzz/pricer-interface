@@ -10,77 +10,77 @@ import numpy as np
 from Pricing.Rates import GetResults
 from Pricing.Utilities import Display,Functions
 from Pricing.Curves import Classic
-
+from Pricing.Rates.Model import  HullWhite
+from Pricing.Rates import Instruments
+from Pricing.Rates.Payoffs.Autocallable import TARN, Autocall
+from Pricing.Rates.Payoffs.Callable import Digit, FixedRate,RangeAccrual,MinMax
 
 DataPath =r"C:\Users\jorda\OneDrive\Documents\pricer_interface-main\snapshot"
 calc_date=ql.Date(11,11,2025)
 mkt_data=GetResults.retrieve_data(path_folder=DataPath,date=calc_date)
-currency='EUR'
-curve,risky_curve=Classic.get_curves(calc_date,mkt_data,currency)
 
+input={'_source_tab':'Autocall',
+        'param':{'issue_date':'30.11.2025',
+        'maturity':'10',
+        'fixing_days_offset':'-5',
+        'frequency':'Annually',
+        'coupon_level':'3.5%',
+        'coupon':'3%',
+        'autocall_level':'2.25%',
+        'underlying1':'EUR CMS 10Y',
+        'memory_effect':'false',
+        'fixing_type':'in arrears',
+        'NC':'1',
+        'currency':'EUR',
+        'structure_type':'Bond',
+        'solving_choice':'Price'}}
 
-# def instantaneous_f(t,h=0.01):
-#     res=-(np.log(curve.discount_factor_from_times(t+h))-np.log(curve.discount_factor_from_times(t)))/h
-#     return res
-
-# grid=np.arange(1.8,2.3,0.05)
-# temp=Functions.integral_cst_by_part(curve.rates, curve.tgrid, grid, eps=0.1)
-# print(pd.DataFrame({'grid':curve.tgrid,'value':curve.rates}))
-# print(temp)
-#dates=list(ql.MakeSchedule(calc_date,calc_date+ql.Period("50Y"),ql.Period('1Y')))
-#print(pd.DataFrame({'dates':dates,'value':curve.discount_factor(dates)}))
-
-
-
-# import numpy as np
-# dates=list(ql.MakeSchedule(calc_date,calc_date+ql.Period("10Y"),ql.Period('1Y')))
-
-# print(risky_curve.model.compute_default_proba(np.arange(0,10,1)))
-
-
-from Pricing.Rates.Model import  HullWhite
-from Pricing.Rates import Instruments
-
+currency=input['param']['currency']
 option='swaption'
-prep_model=HullWhite.get_model(calc_date,mkt_data,currency,option)
+prep_model=HullWhite.get_model(mkt_data['calc_date'],mkt_data,input['param']['underlying1'])
 model=prep_model['model']
-if option=='swaption':
+curve=prep_model['curve']
+
+currency,rate_type,tenor=input['param']['underlying1'].split()
+if rate_type=='CMS':
     instruments=Instruments.select_and_prepare_swaptions(mkt_data['swaption'],
-                                        curve,calc_date,currency)
-    instruments=[x for x in instruments if x.strike_type=='ATM']
-elif option=="cap":
+                                            curve,calc_date,currency)
+    instruments=[x for x in instruments if x.strike_type=='ATM' and x.tenor==tenor]
+elif rate_type=='Euribor':
     instruments=Instruments.select_and_prepare_caps(mkt_data['caps'],curve,calc_date,currency)
 
-df=pd.DataFrame({'Item':instruments,
-                    'Mkt price':[x.mkt_price for x in instruments],
-                    'Th price':[model.price_swaption(x) for x in instruments]})
-print(df)
-# input={'_source_tab':'FixedRate',
-#                 'param':{'issue_date':'30.11.2025',
-#                         'maturity':'8',
-#                         'fixing_days_offset':'-5',
-#                         'frequency':'Annually',
-#                         'coupon':'4%',
-#                         'fixing_type':'in arrears',
-#                         'currency':'EUR',
-#                         'structure_type':'Swap',
-#                         'funding_spread':'90bps',
-#                         'solving_choice':'Price'}}
-# data_callable={'multi-call': 'true',
-#                 'NC':'3'}
-# input['param'].update(data_callable)
+t_array=np.arange(1,10,1)
+print(model.cvx_adj_helper.compute_adjustment(t_array,tenor='10Y'))
+# df=pd.DataFrame({'Item':instruments,
+#                     'Mkt price':[x.mkt_price for x in instruments],
+#                     'Th price':[model.price_swaption(x) for x in instruments]})
+# AUTOCALL_MAPPING={'Autocall':Autocall.precomputation,
+#                     'Tarn':TARN.precomputation}
 
-# from Pricing.Rates.Payoffs.Callable import FixedRate 
-# from Pricing.Rates import Funding
-# from Pricing.Utilities import Functions
-# import numpy as np
+# CALLABLE_MAPPING={'Digit':Digit.precomputation,
+#                     'RangeAccrual':RangeAccrual.precomputation,
+#                     'FixedRate':FixedRate.precomputation,
+#                     'MinMax':MinMax.precomputation}
 
-# contract=FixedRate.FixedRate(input['param'])
-# data_rates=model.generate_rates(calc_date,contract.pay_dates[-1],
-#                        cal=ql.Thirty360(ql.Thirty360.BondBasis),Nbsimu=10000,seed=0)
+# if input['_source_tab'] in ['Autocall','Tarn']:
+#     dic_prep=AUTOCALL_MAPPING.get(input['_source_tab'])(prep_model['calc_date'],
+#                                                         prep_model['model'],input['param'])
+# else:
+#     dic_prep=CALLABLE_MAPPING.get(input['_source_tab'])(prep_model['calc_date'],
+#                                                         prep_model['model'],input['param'],
+#                                                         prep_model['risky_curve'],risky=True)
+    
 
-# cal=ql.Actual360()
+# contract=dic_prep['contract']
 
-# leg_funding=Funding.Leg(contract,contract.currency)
-# rates,schedule=data_rates['rates'],data_rates['schedule'][1:]
-# idxs=Functions.find_idx(schedule,leg_funding.fix_dates)
+# # fix_dates=contract.fix_dates
+# # fixgrid=[curve.calendar.yearFraction(calc_date,d) for d in fix_dates]
+# # print(fixgrid)
+# # print( [model.instantaneous_f(t,h=0.1) for t in fixgrid])
+
+# # print([model.alpha_T(t,10) for t in fixgrid ])
+
+# print(pd.DataFrame({'grid':curve.tgrid,'rate':curve.rates,'df':curve.value}))
+
+# print(curve.forward_swap_rate(contract.fix_dates[0],tenor='10Y',
+#                             fix_freq='1Y',float_freq='6M') )

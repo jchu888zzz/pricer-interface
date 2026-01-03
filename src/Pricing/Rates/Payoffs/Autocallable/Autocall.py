@@ -9,8 +9,7 @@ from Pricing.Rates import Funding
 def precomputation(calc_date:ql.Date,model,data:dict[str:str]):
 
     contract=Autocall(data)
-    data_rates=model.generate_rates(calc_date,contract.pay_dates[-1],
-                       cal=ql.Thirty360(ql.Thirty360.BondBasis),Nbsimu=10000,seed=0)
+    data_rates=model.generate_rates(calc_date,contract.pay_dates[-1],Nbsimu=10000,seed=0)
     
     contract._update(calc_date,cal=ql.Thirty360(ql.Thirty360.BondBasis))
     contract.compute_funding_adjustment(calc_date)
@@ -36,7 +35,6 @@ def precomputation(calc_date:ql.Date,model,data:dict[str:str]):
     else:
         funding_leg=Funding.Leg(contract,contract.currency)
         funding_leg.precomputation(calc_date,model,data_rates)
-    
         res.update({'funding_leg':funding_leg})
     return res    
 
@@ -63,8 +61,6 @@ def compute_price(dic_prep:dict,risky_curve):
         zc=risky_curve.discount_factor(contract.pay_dates,risky=False)
         structure_price=sum(contract.res_coupon*zc)
         
-        print('structure price',structure_price)
-        print('funding price',funding_price)
         price=structure_price-funding_price
         res['funding_table']=Base.organize_funding_table(funding_leg,funding_ZC)
     else:

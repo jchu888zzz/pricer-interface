@@ -194,8 +194,6 @@ def compute_stop_idxs_with_undl(contract,regressions:list[KNeighborsRegressor | 
         
     return res
 
-
-    
 def compute_price(dic_prep:dict,risky_curve,basis_option:str,regressor_class:KNeighborsRegressor | Ridge):
     """
     Compute price for callable bond or swap.
@@ -245,6 +243,9 @@ def compute_price(dic_prep:dict,risky_curve,basis_option:str,regressor_class:KNe
         if not is_swap:
             contract.res_capital=Base.compute_bond_measure_change(dic_arg['measure_change_factor'],
                                                                     stop_idxs)
+            contract.funding_spread=Base.get_funding_spread_early_redemption(risky_curve,
+                                                                contract.pay_dates,contract.proba_recall,
+                                                                contract.funding_adjustment)
         else:
             funding_leg.compute_values_for_early_redemption(stop_idxs,contract.funding_spread)
     else:
@@ -266,9 +267,7 @@ def compute_price(dic_prep:dict,risky_curve,basis_option:str,regressor_class:KNe
     res['price']=price
     res["duration"]=sum(contract.proba_recall*contract.paygrid)
     res["coupon"]=contract.coupon
-    res["funding_spread"]=Base.get_funding_spread_early_redemption(risky_curve,
-                                                                contract.pay_dates,contract.proba_recall,
-                                                                contract.funding_adjustment)
+    res["funding_spread"]=contract.funding_spread
     
     if is_swap:
         res['funding_table']=Base.organize_funding_table(funding_leg,funding_zc)

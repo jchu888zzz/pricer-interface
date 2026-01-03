@@ -7,8 +7,8 @@ from Pricing.Credit.Model import Intensity
 import Pricing.Credit.Instruments as Credit_instruments
 from Pricing.Utilities import Functions
 
-def get_curves(calc_date:ql.Date,dic_df:dict,currency:str):
-    instruments=sort_and_select_instruments(calc_date,dic_df['curve'],currency,'3M')
+def get_curves(calc_date:ql.Date,dic_df:dict,currency:str,option:str):
+    instruments=sort_and_select_instruments(calc_date,dic_df['curve'],currency,option)
     curve=Curve(calc_date,currency,instruments)
     issuer='CIC_'+currency
     entity=Credit_instruments.retrieve_credit_single_from_dataframe(dic_df['issuer'],issuer,calc_date)
@@ -73,7 +73,7 @@ _PATTERNS={'Overnight': {'deposit':'Deposit', 'swap':r'^(?=.*Basis_swap)(?=.*V_O
 
 
 _BUSINESS_CALENDAR=ql.TARGET()
-_CRITERION={'EUR': (ql.Period("8M"),ql.Period("18M")),
+_CRITERION={'EUR': (ql.Period("12M"),ql.Period("20M")),
                     'USD':(ql.Period("5M"),ql.Period("12M")),
                     'GBP':(ql.Period("9M"),ql.Period("20M")),
                     'CHF':(ql.Period("9M"),ql.Period("18M")) }
@@ -178,19 +178,21 @@ class Curve:
             value=zc_temp(r,T)
             return (1-value)/(T*value)
         
-        def from_futures(value:float,t:float,T:float):
-            return 100*(1+np.log(value)/(T-t))
-        
+        def from_futures(r:float,t:float,T:float,c:float):
+            temp=zc_temp(r-c,[t,T])
+            fwd_rate=(1/(temp[1]/temp[0])-1)/(T-t)
+            return 100*(1-fwd_rate)
+
         def from_swap(r:float,fix_schedule:list[ql.Date],float_schedule:list[ql.Date]):
             fix_grid=np.array([self.calendar.yearFraction(self.calc_date,x)
                                 for x in fix_schedule])
             
             fix_DF=zc_temp(r, fix_grid)      
-            lvl=sum(fix_DF[1:]*np.array([x-y for x,y in zip(fix_grid[1:],fix_grid)]))
-
-            t_float=self.calendar.yearFraction(self.calc_date,float_schedule[-1]) 
-            float_DF=zc_temp(r, t_float)      
-            return (1-float_DF)/lvl
+            lvl=sum(fix_DF[1:]*np.diff(fix_grid))
+            float_grid=np.array([self.calendar.yearFraction(self.calc_date,x)
+                                for x in float_schedule])
+            float_DF=zc_temp(r, float_grid)      
+            return (float_DF[0]-float_DF[-1])/lvl
 
         self.tgrid=np.array([self.calendar.yearFraction(self.calc_date,x.maturity_date)
                                     for x in instruments])        
@@ -202,23 +204,23 @@ class Curve:
                 func=lambda r: from_deposit(r,t) - item.quote
                 
             elif isinstance(item,Future):
+
                 t0=self.calendar.yearFraction(self.calc_date,item.start_date)
                 t1=self.calendar.yearFraction(self.calc_date,item.maturity_date)
-        
-                func=lambda r: from_futures(zc_temp(r,t)/self.value[i-1],t0,t1) - item.quote
+                sigma=0.01
+                cvx_adj=0.5*sigma*t0*(t1-t0)
+                func=lambda r: from_futures(r,t0,t1,cvx_adj) - item.quote
                 
             elif isinstance(item,Swap) :
-                if ql.Period(item.period)<ql.Period('1Y'):
+                if ql.Period(item.period)<=ql.Period('1Y'):
                     func=lambda r: from_deposit(r,t) - item.quote
                 else:
                     func=lambda r: from_swap(r,item.fix_schedule,
                                             item.float_schedule) -item.quote
             else:
                 raise ValueError(f'{item} instance not valid')
-            
-            self.rates[i]=brentq(func,-0.5,0.5,maxiter=100,xtol=1e-05)
+            self.rates[i]=brentq(func,-0.2,0.2,maxiter=20,xtol=1e-05)
             self.value[i]=np.exp(-Functions.integral_cst_by_part(self.rates, self.tgrid,t,eps))
-
         self.precomputed_integral=Functions.IntegralCSTPrecalculated(self.rates,self.tgrid,eps)
 
     def discount_factor(self,dates:list[ql.Date]):

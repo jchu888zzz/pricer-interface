@@ -70,10 +70,11 @@ class Swaption:
         if (self.typequote== 'normal_vol'):
             k=(fwd-strike)/vol_    
             self.mkt_price=np.sum(zc[1:]*delta)*vol_*(np.exp(-0.5*k**2)/np.sqrt(2*np.pi)  + k*norm.cdf(k))*10000
-        else:
+        elif self.typequote=='vol':
             d1,d2=0.5*vol_,-0.5*vol_            
             self.mkt_price=np.sum(zc[1:]*delta)*strike*(norm.cdf(d1)-norm.cdf(d2))*10000
-
+        else:
+            raise ValueError(f"{self.typequote} not implemented")
 _DIC_FREQ_SWAPTION={'USD':{'fix_freq':'6M','float_freq':'3M'},
                 'EUR':{'fix_freq':'1Y','float_freq':'6M'}}
 def select_and_prepare_swaptions(df:pd.DataFrame,curve,calc_date:ql.Date,currency:str) -> tuple[Swaption]:
