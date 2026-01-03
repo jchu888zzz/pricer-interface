@@ -9,11 +9,10 @@ from collections import Counter
 def get_compound_rate(rates:np.ndarray,d1:ql.Date,d2:ql.Date,N=360):
 
     bdays=ql.TARGET().businessDayList(d1,d2)
-    delta=np.array([x-y for x,y in zip(bdays[1:],bdays)])
+    delta=np.diff(bdays)
     dc=ql.Actual360().dayCount(d1,d2)
     res=np.array([(np.prod(1+r*delta/N)-1)*N/dc for r in rates])
     return res
-
 
 _DIC_CURRENCY={'EUR':'3M','USD':'Overnight'}
 class Leg:
@@ -46,8 +45,8 @@ class Leg:
         
         fixgrid=np.array([max(0,cal.yearFraction(calc_date,x)) for x in self.fix_dates ])
         paygrid=np.array([cal.yearFraction(calc_date,x) for x in self.pay_dates])
-        self.delta=np.array([paygrid[0]]+[x-y for x,y in zip(paygrid[1:],paygrid)] )
-
+        self.delta=np.diff(paygrid,prepend=0)
+    
         t_maturity=cal.yearFraction(calc_date,self.maturity_date)
         if self.type_rate=='Overnight':
             self.fwds=np.zeros((len(self.fix_dates),rates.shape[0]))
@@ -62,8 +61,11 @@ class Leg:
         elif self.type_rate=='3M':            
             idxs=Functions.find_idx(schedule,self.fix_dates)
             self.fwds=model.compute_deposit_from_rates(rates[:,idxs],fixgrid,'3M')
-            # self.fwds=np.array([model.compute_deposit_from_rates(rates[:,i],t,'3M')
-            #                             for i,t in zip(idxs,fixgrid) ])
+            #Set first value to spot to avoid numerical approximation at beginning
+            h=0.25
+            zc=model.curve.parametric_form(h)
+            self.fwds[:,0]=(1-zc)/(zc*h)
+
         else:
             raise ValueError(f'{self.type_rate} not implemented')
         
@@ -72,8 +74,7 @@ class Leg:
             return
         else:
             idxs=[Functions.find_idx(schedule,d) for d in self.pay_dates]
-            self.measure_change_factor=np.array([Base.compute_measure_change_factor(model,rates[:,i],t,t_maturity) 
-                                        for i,t in zip(idxs,paygrid) ])
+            self.measure_change_factor=Base.compute_measure_change_factor(model,rates[:,idxs],paygrid,t_maturity) 
             
             self.zc_continuation=[None]*len(contract.call_dates)
             for i,d in enumerate(contract.call_dates):
@@ -82,31 +83,56 @@ class Leg:
                 pay_idx=bisect(self.pay_dates,d)
                 self.zc_continuation[i]=model.compute_discount_factor_from_rates(rates[:,idx],t,paygrid[pay_idx:])
 
-    def compute_cashflows(self,spread:float):    
+    def compute_cashflows(self,spread:float):  
         return (self.fwds+spread)*np.tile(self.delta,(self.fwds.shape[0],1))
     
     def compute_values(self,spread:float):
         self.proba=np.ones(len(self.pay_dates))
         self.coupons=np.mean(self.compute_cashflows(spread),axis=0)
 
-    def compute_values_for_early_redemption(self,stop_idxs:list[int],spread:float):
-        contract=self.contract
-        mask_alive=np.ones((len(stop_idxs),len(self.pay_dates)))
-        for i,idx in enumerate(stop_idxs):
-            j=bisect(self.pay_dates,contract.pay_dates[idx])
-            mask_alive[i,j:]=0
+    def compute_values_for_early_redemption(self, stop_idxs: list[int], spread: float):
+        contract = self.contract
         
-        self.coupons=np.zeros(len(self.pay_dates))
-        self.proba=np.ones(len(self.pay_dates))
-
-        for i,d in enumerate(self.pay_dates):
-            cashflows=self.fwds[i]+spread
-            if d <=contract.call_dates[0]:
-                self.coupons[i]= np.mean(cashflows)*self.delta[i]
-            else:
-                idx=Functions.find_idx(contract.pay_dates,d)
-                self.proba[i]=min(1,np.mean([b/x for x,b in zip(self.measure_change_factor[i],mask_alive[:,i])]))
-                amount=np.mean([ x*y for x,y in zip(cashflows/self.measure_change_factor[i],mask_alive[:,i])])
-                self.coupons[i]=amount*self.delta[i]
+        # Create mask_alive: (num_simulations, num_pay_dates)
+        # Marks which coupons are still paid in each simulation path
+        mask_alive = np.ones((len(stop_idxs), len(self.pay_dates)))
+        for i, idx in enumerate(stop_idxs):
+            j = bisect(self.pay_dates, contract.pay_dates[idx])
+            mask_alive[i, j:] = 0
+        
+        # Compute cashflows once: (num_simulations, num_pay_dates)
+        cashflows = self.compute_cashflows(spread)
+        
+        # Initialize result arrays
+        self.coupons = np.zeros(len(self.pay_dates))
+        self.proba = np.ones(len(self.pay_dates))
+        
+        # Vectorized approach: separate early and late dates
+        first_call_date = contract.call_dates[0]
+        pay_dates_array = np.array([d for d in self.pay_dates])
+        early_mask = pay_dates_array <= first_call_date
+        late_mask = ~early_mask
+        
+        # Early dates (before first call): simpler calculation
+        if np.any(early_mask):
+            early_idx = np.where(early_mask)[0]
+            self.coupons[early_idx] = np.mean(cashflows[:, early_idx], axis=0)
+        
+        # Late dates (after first call): vectorized with early redemption logic
+        if np.any(late_mask):
+            late_idx = np.where(late_mask)[0]
+            cf_late = cashflows[:, late_idx]  # (num_sims, num_late)
+            mask_late = mask_alive[:, late_idx]  # (num_sims, num_late)
+            
+            mcf_late = self.measure_change_factor[:, late_idx]  # (num_simulations, num_late)
+            
+            # Vectorized probability: proportion of simulations alive at each date
+            # Using min(1.0, ...) per element to match original logic
+            prob_ratios = mask_late / np.maximum(mcf_late, 1e-10)  # Avoid division by zero
+            self.proba[late_idx] = np.minimum(1.0, np.mean(prob_ratios, axis=0))
+            
+            # Vectorized amount: average of (cashflow / measure_change_factor) * alive_mask
+            amounts = np.mean((cf_late / mcf_late) * mask_late, axis=0)
+            self.coupons[late_idx] = amounts
 
     

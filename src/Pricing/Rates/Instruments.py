@@ -41,7 +41,7 @@ class Swaption:
         end_date=start_date + ql.Period(self.tenor)
         schedule=list(ql.MakeSchedule(start_date,end_date,ql.Period(self.float_freq)))
         tgrid=np.array([daycount_calendar.yearFraction(calc_date,x) for x in schedule])
-        delta=np.array([x-y for x,y in zip(tgrid[1:],tgrid)])
+        delta=np.diff(tgrid)
         zc=curve.discount_factor(schedule)
         #Compute strike
         strike=curve.forward_swap_rate(start_date,self.tenor,self.fix_freq,self.float_freq)
@@ -59,6 +59,13 @@ class Swaption:
         self.delta=delta
         self.K=strike
         self.tgrid=tgrid
+        self.c=self.delta*self.K
+        self.c[-1]+=1
+        # Step 11: Pre-compute values for affine_term
+        self.t0=tgrid[0]
+        self.T_minus_t=tgrid[1:]-tgrid[0]
+        self.DF_T=curve.discount_factor_from_times(tgrid[1:])
+        self.DF_t0=curve.discount_factor_from_times(tgrid[0])
 
         if (self.typequote== 'normal_vol'):
             k=(fwd-strike)/vol_    
@@ -116,7 +123,7 @@ class Cap:
         zc=curve.discount_factor(schedule)
 
         tgrid=np.array([daycount_calendar.yearFraction(calc_date,y) for y in schedule])
-        delta=np.array([x-y for x,y in zip(tgrid[1:],tgrid)])
+        delta=np.diff(tgrid)
 
         #compute strike
         if self.strike=='ATM':
@@ -135,6 +142,7 @@ class Cap:
         self.delta=delta
         self.K=strike
         self.tgrid=tgrid
+        self.K_prime=(1+self.K*self.delta)
 
         if (self.typequote== 'normal_vol'):
             k=(L_ratio-strike)/vol_

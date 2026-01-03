@@ -48,28 +48,24 @@ class Intensity:
         self.values=values
         self.entity=entity
 
-    def compute_survival_proba(self,t:float):
+    def compute_survival_proba(self,t:float | np.ndarray):
         standard_tgrid=self.entity.tgrid
         if t<=0:
             return 1
-        integral=Functions.positive_integral_constant_by_part(self.values,standard_tgrid,t)
+        integral=Functions.integral_cst_by_part(self.values,standard_tgrid,t)
         return np.exp(-integral)
     
-    def compute_default_proba(self,t:float):
+    def compute_default_proba(self,t:float | np.ndarray):
         standard_tgrid=self.entity.tgrid
-        if t<=0:
-            return 0
-        integral=Functions.positive_integral_constant_by_part(self.values,standard_tgrid,t)
+        integral=Functions.integral_cst_by_part(self.values,standard_tgrid,t)
         return 1-np.exp(-integral)
 
     def generate_jump(self,size):
         standard_tgrid=self.entity.tgrid
         seed=123
         rng=np.random.default_rng(int(seed))
-        U=rng.uniform(0,1,size=size)
-
-        res=[Functions.inverse_positive_integral_constant_by_part(self.values,standard_tgrid,-np.log(u),100)
-            for u in U]
+        simu_uniform=rng.uniform(0,1,size=size)
+        res=Functions.inverse_integral_cst_by_part(self.values,standard_tgrid,-np.log(simu_uniform),100)
 
         return np.array(res)
 

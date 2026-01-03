@@ -63,6 +63,8 @@ def compute_price(dic_prep:dict,risky_curve):
         zc=risky_curve.discount_factor(contract.pay_dates,risky=False)
         structure_price=sum(contract.res_coupon*zc)
         
+        print('structure price',structure_price)
+        print('funding price',funding_price)
         price=structure_price-funding_price
         res['funding_table']=Base.organize_funding_table(funding_leg,funding_ZC)
     else:

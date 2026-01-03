@@ -1,8 +1,9 @@
 import numpy as np
-from scipy.stats import norm
-from scipy.optimize import brentq,least_squares
+
+from scipy.special import ndtr  # Step 9: Faster than norm.cdf for arrays
+from scipy.optimize import brentq,least_squares,newton
 import QuantLib as ql
-from scipy.interpolate import CubicSpline
+
 
 from Pricing.Utilities import Dates
 from Pricing.Utilities.decorators import timer 
@@ -36,24 +37,36 @@ def get_model(calc_date:ql.Date,mkt_data:dict,currency:str,option='swaption') ->
             'calc_date':calc_date}
 
 def Put(vol:float,K:float,ZC1:float,ZC2:float)-> float:
-    
     d1=(1/vol)*np.log(ZC1*K/ZC2)+ 0.5*vol
     d2=d1-vol
-    return K*ZC1*norm.cdf(d1) - ZC2*norm.cdf(d2)
+    # Step 9: Use ndtr instead of norm.cdf (faster for arrays)
+    return K*ZC1*ndtr(d1) - ZC2*ndtr(d2)
 
 @timer
 def Calibration(curve,instru_calib:list[Rate_Instruments.Swaption | Rate_Instruments.Cap]):
     Caps=[x for x in instru_calib if isinstance(x,Rate_Instruments.Cap)]
     Swaptions=[x for x in instru_calib if isinstance(x,Rate_Instruments.Swaption) ]
-    def error_function(param:tuple[float]):
-        model=HW(curve,param=param)
-        res=[]
-        for item in Swaptions:
-            res.append((item.mkt_price-model.price_swaption(item))/1e4)
-        for item in Caps:
-            res.append((item.mkt_price-model.price_cap(item))/1e4)
 
-        return np.array(res)
+    # Step 1: Pre-allocate result array (avoids repeated list append + np.array conversion)
+    n_swap = len(Swaptions)
+    n_cap = len(Caps)
+    result = np.empty(n_swap + n_cap, dtype=np.float64)
+
+    # Step 2: Reuse HW object, just update parameters each iteration
+    model = HW(curve, param=(0.02, 0.02))
+
+    # Step 4: Pre-extract market prices (avoids repeated attribute access in loop)
+    swap_mkt = [item.mkt_price for item in Swaptions]
+    cap_mkt = [item.mkt_price for item in Caps]
+
+
+    def error_function(param:tuple[float]):
+        model.a, model.sigma = param[0], param[1]
+        for i in range(n_swap):
+            result[i] = (swap_mkt[i] - model.price_swaption(Swaptions[i])) / 1e4
+        for j in range(n_cap):
+            result[n_swap + j] = (cap_mkt[j] - model.price_cap(Caps[j])) / 1e4
+        return result.copy()
 
     optimizer=least_squares(error_function,x0=(0.02,0.02),bounds=([1e-5,1e-3],[0.5,np.sqrt(0.1)]))
 
@@ -77,7 +90,6 @@ class HW :
     def __init__(self,curve:Classic.Curve,param=(0.02,0.02)):
         #Forward and DF are interpolation function
         self.curve=curve
-        #self.DF=CubicSpline(curve.tgrid,curve.value)
         self.DF=curve.discount_factor_from_times
         self.a,self.sigma=param[0],param[1]
         
@@ -85,7 +97,7 @@ class HW :
         return f'HW(a:{self.a},sigma:{self.sigma})'
     
     #Smoother instantaneous forward rate
-    def instantaneous_f(self,t,h=0.1):
+    def instantaneous_f(self,t,h=0.01):
         res=-(np.log(self.DF(t+h))-np.log(self.DF(t)))/h
         return res
     
@@ -99,11 +111,13 @@ class HW :
     def affine_term(self,t:float,T:np.ndarray|float) ->tuple[np.ndarray]:
         forward=self.instantaneous_f(t)
         B_term=self.compute_B_term(T-t)
-        A_term= self.DF(T)/self.DF(t)*np.exp(B_term*forward - 0.5*(B_term**2)*self.sigma**2*self.compute_B_term(t,factor=2))
-        return (A_term,B_term)
+        # Step 6: Cache B_term_2a and return it to avoid recomputation
+        B_term_2a=self.compute_B_term(t,factor=2)
+        A_term= self.DF(T)/self.DF(t)*np.exp(B_term*forward - 0.5*(B_term**2)*self.sigma**2*B_term_2a)
+        return (A_term,B_term,B_term_2a)
     
     def compute_discount_factor_from_rates(self,rate:np.ndarray,t:float,T:np.ndarray|float)->np.ndarray:
-        A_term,B_term=self.affine_term(t,T)
+        A_term,B_term,_=self.affine_term(t,T)
         rate_reshaped=rate.reshape(-1,1) if rate.ndim==1 else rate
         return A_term*np.exp(-rate_reshaped*B_term)
     
@@ -124,27 +138,30 @@ class HW :
         return self.instantaneous_f(t) + term1 -term2
     
     def price_cap(self,item:Rate_Instruments.Cap)->float:
-        
-        K_prime=(1+item.K*item.delta)
-        ZC_ratio=[x/y for x,y in zip(item.ZC,item.ZC[1:])]
-        
+        # Step 8: Use numpy array slicing instead of list comprehension
+        ZC_ratio=item.ZC[:-1]/item.ZC[1:]
+
         vol_i=self.compute_B_term(item.delta)*self.sigma*np.sqrt(self.compute_B_term(item.tgrid[:-1],factor=2))
-        d1=(1/vol_i)*np.log(ZC_ratio/K_prime) + 0.5*vol_i
+        d1=(1/vol_i)*np.log(ZC_ratio/item.K_prime) + 0.5*vol_i
         d2=d1-vol_i
-    
-        return np.sum(item.ZC[:-1]*norm.cdf(d1)-K_prime*item.ZC[1:]*norm.cdf(d2))*10**4
+
+        # Step 9: Use ndtr instead of norm.cdf (faster for arrays)
+        return np.sum(item.ZC[:-1]*ndtr(d1)-item.K_prime*item.ZC[1:]*ndtr(d2))*10**4
     
     def price_swaption(self,item:Rate_Instruments.Swaption)->float:
-        c=item.delta.copy()*item.K
-        c[-1]+=1
-        
-        A_term,B_term=self.affine_term(item.tgrid[0],item.tgrid[1:])
-        func_to_solve= lambda x : np.sum(c*A_term*np.exp(-B_term*x)) -1 
+        # Step 11: Use pre-computed values from item
+        B_term=self.compute_B_term(item.T_minus_t)
+        B_term_2a=self.compute_B_term(item.t0,factor=2)
+        forward=self.instantaneous_f(item.t0)
+        A_term=item.DF_T/item.DF_t0*np.exp(B_term*forward - 0.5*(B_term**2)*self.sigma**2*B_term_2a)
+
+        func_to_solve= lambda x : np.sum(item.c*A_term*np.exp(-B_term*x)) -1
         r_star=brentq(func_to_solve,-0.8,0.8)
+        #r_star=newton(func_to_solve,0,fprime= lambda x :np.sum(-B_term*item.c*A_term*np.exp(-B_term*x)))
         X_term=A_term*np.exp(-B_term*r_star)
 
-        vol_=B_term*self.sigma*np.sqrt(self.compute_B_term(item.tgrid[0],factor=2))
-        return np.sum(c*Put(vol_,X_term,item.ZC[0],item.ZC[1:]))*10**4
+        vol_=B_term*self.sigma*np.sqrt(B_term_2a)
+        return np.sum(item.c*Put(vol_,X_term,item.ZC[0],item.ZC[1:]))*10**4
 
     def get_CMS_adjustment(self,Curve,calc_date:ql.Date,Instruments:list):
         self.cms_adj=CA.GetAdjustment(Curve,calc_date,Instruments)
@@ -154,7 +171,7 @@ class HW :
         
         alpha,Var=[self.alpha_T(t,T) for t in grid ],[self.var_(t) for t in grid]
         res=np.zeros((Nb_simu,len(grid)))
-        initial_t=0.25
+        initial_t=0.01
         res[:,0]=-(np.log(self.DF(initial_t))-np.log(self.DF(0)))/initial_t
 
         for i in range(1,len(grid)):
@@ -179,11 +196,13 @@ class HW :
         P_term=self.compute_discount_factor_from_rates(rates,t,t+h)
         return (1-P_term)/(P_term*h)
     
+    
+
     def compute_cms_from_rates(self,rates:np.ndarray,t:float,tenor:str,delta_fix:float,delta_float:float) -> np.ndarray:
         tenor=convert_period(tenor)
         fix_tgrid=t+np.arange(0,tenor,delta_fix)
         P_fix=self.compute_discount_factor_from_rates(rates,t,fix_tgrid)
-        delta=np.array([x-y for x,y in zip(fix_tgrid[1:],fix_tgrid)])
+        delta=np.diff(fix_tgrid)
         lvl=np.sum(P_fix[:,1:]*delta,axis=1)
         
         res=(P_fix[:,0]-P_fix[:,-1])/lvl
@@ -264,7 +283,7 @@ class HW :
             t=daycount_calendar.yearFraction(calc_date,d)
             fix_tgrid=t+np.arange(0,t_maturity,fix_freq)
             P_fix=self.compute_discount_factor_from_rates(rates[idx],t,fix_tgrid)
-            delta=np.array([x-y for x,y in zip(fix_tgrid[1:],fix_tgrid)])
+            delta=np.diff(fix_tgrid)
             lvl=np.sum(P_fix[:,1:]*delta,axis=1)
             
             float_tgrid=t+np.arange(0,t_maturity,float_freq)

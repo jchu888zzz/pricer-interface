@@ -5,7 +5,7 @@ import numpy as np
 from scipy.optimize import brentq
 from Pricing.Credit.Model import Intensity 
 import Pricing.Credit.Instruments as Credit_instruments
-
+from Pricing.Utilities import Functions
 
 def get_curves(calc_date:ql.Date,dic_df:dict,currency:str):
     instruments=sort_and_select_instruments(calc_date,dic_df['curve'],currency,'3M')
@@ -99,9 +99,9 @@ def sort_and_select_instruments(calc_date:ql.Date,df:pd.DataFrame,cur_name:str,o
         res.maturity_date=_BUSINESS_CALENDAR.advance(calc_date+ql.Period("2D"),ql.Period(res.period),
                                             ql.ModifiedFollowing)
         res.fix_schedule=list(ql.MakeSchedule(calc_date+ql.Period("2D"),
-                                            res.maturity_date,ql.Period(fix_freq)))[1:]
+                                            res.maturity_date,ql.Period(fix_freq)))
         res.float_schedule=list(ql.MakeSchedule(calc_date+ql.Period("2D"),
-                                                res.maturity_date,ql.Period(float_freq)))[1:]
+                                                res.maturity_date,ql.Period(float_freq)))
         return res
 
     def make_future(item):
@@ -141,47 +141,6 @@ def sort_and_select_instruments(calc_date:ql.Date,df:pd.DataFrame,cur_name:str,o
 
     return sorted(res,key=lambda x: x.maturity_date)
 
-def interval_integral(previous_r, r, t1, t_array, t2, eps=0.1):
-    """
-    Compute interval integral - handles both scalar and array inputs.
-
-    Args:
-        previous_r: Previous rate (scalar or array)
-        r: Current rate (scalar or array)
-        t1: Start time (scalar or array)
-        t_array: Time points to evaluate (scalar or array)
-        t2: End time (scalar or array)
-        eps: Parameter (default 0.1)
-
-    Returns:
-        Scalar or array of integral values matching input shape
-    """
-    # Handle scalar inputs
-    is_scalar = np.isscalar(t_array)
-    if is_scalar:
-        t_array = np.array([t_array])
-        previous_r = np.atleast_1d(previous_r)
-        r = np.atleast_1d(r)
-        t1 = np.atleast_1d(t1)
-        t2 = np.atleast_1d(t2)
-
-    h = t2 - t1
-    t_delta = t_array - t1
-    r_delta = r - previous_r
-
-    # Vectorized conditional: use np.where to branch based on condition
-    threshold = t1 + eps * h
-    # Calculate both branches
-    early_branch = t_delta * previous_r + r_delta * 0.5 * t_delta ** 2 / (eps * h)
-    late_branch = eps * (h * previous_r + h * 0.5 * r_delta) + r * (1 - eps) * (t_array - threshold)
-    # Select based on condition
-    result = np.where(t_array <= threshold, early_branch, late_branch)
-
-    # Return scalar if input was scalar
-    if is_scalar:
-        return result[0]
-    return result
-
 def find_first_zero(a) -> int:
     if 0 not in a:
         raise ValueError("No Zero")
@@ -205,106 +164,63 @@ class Curve:
         return [self.calendar.yearFraction(self.calc_date,d) for d in dates]
     
     def parametric_form(self,t_array:np.ndarray) ->float:
-
-        # Handle scalar input - check both np.isscalar and single-element arrays
-        is_scalar = np.isscalar(t_array) or (isinstance(t_array, np.ndarray) and t_array.size == 1)
-        if is_scalar:
-            # Return 1.0 for negative time values (no discounting)
-            if t_array < 0:
-                return 1.0
-            t_array = np.array([t_array])
-        else:
-            # For array inputs, handle negative values
-            t_array = np.asarray(t_array)
-
-        idx = np.searchsorted(self.tgrid, t_array)
-        # Handle boundary condition: if idx > len(tgrid) - 1, set to -1
-        idx = np.where(idx > len(self.tgrid) - 1, -1, idx)
-
-        # Get t1, t2 for each evaluation point
-        t1 = self.tgrid[idx - 1]
-        t2 = self.tgrid[idx]
-
-        # Get rates and values for previous indices
-        r_prev = self.rates[idx - 1]
-        r_curr = self.rates[idx]
-        val_prev = self.value[idx - 1]
-
-        # Compute last integral for all t values at once
-        # Note: Here we call our vectorized interval_integral
-        last_integral = interval_integral(r_prev, r_curr, t1, t_array, t2)
-
-        result = val_prev * np.exp(-last_integral)
-
-        # Handle negative values for array inputs: return 1.0 for t < 0
-        result = np.where(t_array <= 0, 1.0, result)
-
-        # Return scalar if input was scalar
-        if is_scalar:
-            return result[0]
-        return result
+        return np.exp(-self.precomputed_integral.evaluate(t_array))
     
     def calibrate(self,instruments:list):
+        eps=0.1
+        def zc_temp(r:float,t:float):
+            temp_rates=self.rates.copy()
+            idx=Functions.first_occ(temp_rates,0)
+            temp_rates[idx:]=r
+            return np.exp(-Functions.integral_cst_by_part(temp_rates, self.tgrid,t, eps))
         
-        def from_deposit(value:float,T:float)->float:
+        def from_deposit(r:float,T:float)->float:
+            value=zc_temp(r,T)
             return (1-value)/(T*value)
         
         def from_futures(value:float,t:float,T:float):
             return 100*(1+np.log(value)/(T-t))
         
-        def from_swap(r_prev:float,r:float,t_prev:float,
-                    fix_schedule:list[ql.Date],float_schedule:list[ql.Date]):
+        def from_swap(r:float,fix_schedule:list[ql.Date],float_schedule:list[ql.Date]):
             fix_grid=np.array([self.calendar.yearFraction(self.calc_date,x)
                                 for x in fix_schedule])
-            fix_prev_DF=np.array([ self.parametric_form(t) for t in fix_grid if t <= t_prev])
-            fix_increments=np.array([interval_integral(r_prev,r,t_prev,t,t) 
-                                        for t in fix_grid if t> t_prev])
-            fix_DF= np.concatenate( (fix_prev_DF,self.parametric_form(t_prev)*np.exp(-fix_increments)) )        
-
-            lvl=sum(fix_DF*np.array([fix_grid[0]]+[x-y for x,y in zip(fix_grid[1:],fix_grid)]))
             
-            float_grid=np.array([self.calendar.yearFraction(self.calc_date,x)
-                                for x in float_schedule])
+            fix_DF=zc_temp(r, fix_grid)      
+            lvl=sum(fix_DF[1:]*np.array([x-y for x,y in zip(fix_grid[1:],fix_grid)]))
 
-            float_increment=interval_integral(r_prev,r,t_prev,float_grid[-1],float_grid[-1])
-            float_DF=self.parametric_form(t_prev)*np.exp(-float_increment)     
+            t_float=self.calendar.yearFraction(self.calc_date,float_schedule[-1]) 
+            float_DF=zc_temp(r, t_float)      
             return (1-float_DF)/lvl
-        
-        self.tgrid=np.array([0]+[self.calendar.yearFraction(self.calc_date,x.maturity_date)
+
+        self.tgrid=np.array([self.calendar.yearFraction(self.calc_date,x.maturity_date)
                                     for x in instruments])        
         self.rates=np.zeros(len(self.tgrid))
         self.value=np.zeros(len(self.tgrid))
-        self.value[0]=1
-        for i,item in enumerate(instruments,start=1):
-            t_prev=self.tgrid[i-1]
+        for i,item in enumerate(instruments):
             t=self.tgrid[i]
-            r_prev=self.rates[i-1]
-
             if isinstance(item,Deposit):
-                zc=lambda r : self.value[i-1]*np.exp(-interval_integral(r_prev,r,t_prev,t,t))
-                func=lambda r: from_deposit(zc(r),t) - item.quote
+                func=lambda r: from_deposit(r,t) - item.quote
                 
             elif isinstance(item,Future):
                 t0=self.calendar.yearFraction(self.calc_date,item.start_date)
                 t1=self.calendar.yearFraction(self.calc_date,item.maturity_date)
-                increment=lambda r: np.exp(-interval_integral(r_prev,r,t_prev,t,t))
-                func=lambda r: from_futures(increment(r),t0,t1) - item.quote
+        
+                func=lambda r: from_futures(zc_temp(r,t)/self.value[i-1],t0,t1) - item.quote
                 
             elif isinstance(item,Swap) :
                 if ql.Period(item.period)<ql.Period('1Y'):
-                    zc=lambda r : self.value[i-1]*np.exp(-interval_integral(r_prev,r,t_prev,t,t))
-                    func=lambda r: from_deposit(zc(r),item) - item.quote
+                    func=lambda r: from_deposit(r,t) - item.quote
                 else:
-                    
-                    func=lambda r: from_swap(r_prev,r,t_prev,item.fix_schedule,
+                    func=lambda r: from_swap(r,item.fix_schedule,
                                             item.float_schedule) -item.quote
             else:
                 raise ValueError(f'{item} instance not valid')
-                
-            r=brentq(func,-0.5,0.5,maxiter=100,xtol=1e-05)
-            self.value[i]=self.value[i-1]*np.exp(-interval_integral(r_prev,r,t_prev,t,t))
-            self.rates[i]=r
             
+            self.rates[i]=brentq(func,-0.5,0.5,maxiter=100,xtol=1e-05)
+            self.value[i]=np.exp(-Functions.integral_cst_by_part(self.rates, self.tgrid,t,eps))
+
+        self.precomputed_integral=Functions.IntegralCSTPrecalculated(self.rates,self.tgrid,eps)
+
     def discount_factor(self,dates:list[ql.Date]):
         tgrid=self.convert_dates_to_tgrid(dates)
         return self.parametric_form(tgrid)

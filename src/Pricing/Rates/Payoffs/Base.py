@@ -185,7 +185,7 @@ class Payoff :
             start=self.issue_date
         
         grid=np.array([cal.yearFraction(start,x) for x in self.pay_dates])
-        self.delta=np.array([grid[0]] + [x-y for x,y in zip(grid[1:],grid)])
+        self.delta=np.diff(grid,prepend=0)
 
         if hasattr(self,'call_dates'):
             self.call_dates=[x for x in self.call_dates if x> start ]

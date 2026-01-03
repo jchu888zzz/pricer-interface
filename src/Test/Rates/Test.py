@@ -1,15 +1,16 @@
-import QuantLib as ql
-import pandas as pd
 import sys
-
 from pathlib import Path
-
 pricing_root=Path(__file__).parent.parent.parent
 sys.path.insert(0,str(pricing_root))
 
+import QuantLib as ql
+import pandas as pd
+import numpy as np
+
 from Pricing.Rates import GetResults
-from Pricing.Utilities import Display
+from Pricing.Utilities import Display,Functions
 from Pricing.Curves import Classic
+
 
 DataPath =r"C:\Users\jorda\OneDrive\Documents\pricer_interface-main\snapshot"
 calc_date=ql.Date(11,11,2025)
@@ -17,12 +18,32 @@ mkt_data=GetResults.retrieve_data(path_folder=DataPath,date=calc_date)
 currency='EUR'
 curve,risky_curve=Classic.get_curves(calc_date,mkt_data,currency)
 
+
+# def instantaneous_f(t,h=0.01):
+#     res=-(np.log(curve.discount_factor_from_times(t+h))-np.log(curve.discount_factor_from_times(t)))/h
+#     return res
+
+# grid=np.arange(1.8,2.3,0.05)
+# temp=Functions.integral_cst_by_part(curve.rates, curve.tgrid, grid, eps=0.1)
+# print(pd.DataFrame({'grid':curve.tgrid,'value':curve.rates}))
+# print(temp)
+#dates=list(ql.MakeSchedule(calc_date,calc_date+ql.Period("50Y"),ql.Period('1Y')))
+#print(pd.DataFrame({'dates':dates,'value':curve.discount_factor(dates)}))
+
+
+
+# import numpy as np
+# dates=list(ql.MakeSchedule(calc_date,calc_date+ql.Period("10Y"),ql.Period('1Y')))
+
+# print(risky_curve.model.compute_default_proba(np.arange(0,10,1)))
+
+
 from Pricing.Rates.Model import  HullWhite
 from Pricing.Rates import Instruments
 
-prep_model=HullWhite.get_model(calc_date,mkt_data,currency,option='swaption')
-model=prep_model['model']
 option='swaption'
+prep_model=HullWhite.get_model(calc_date,mkt_data,currency,option)
+model=prep_model['model']
 if option=='swaption':
     instruments=Instruments.select_and_prepare_swaptions(mkt_data['swaption'],
                                         curve,calc_date,currency)
@@ -30,15 +51,10 @@ if option=='swaption':
 elif option=="cap":
     instruments=Instruments.select_and_prepare_caps(mkt_data['caps'],curve,calc_date,currency)
 
-# print(pd.DataFrame({'Item':instruments,
-#                     'Mkt price':[x.mkt_price for x in instruments],
-#                     'Th price':[model.price_swaption(x) for x in instruments]}))
-# print(model)
-# item=instruments[0]
-# print(item)
-# print(item.K)
-
-
+df=pd.DataFrame({'Item':instruments,
+                    'Mkt price':[x.mkt_price for x in instruments],
+                    'Th price':[model.price_swaption(x) for x in instruments]})
+print(df)
 # input={'_source_tab':'FixedRate',
 #                 'param':{'issue_date':'30.11.2025',
 #                         'maturity':'8',
@@ -68,20 +84,3 @@ elif option=="cap":
 # leg_funding=Funding.Leg(contract,contract.currency)
 # rates,schedule=data_rates['rates'],data_rates['schedule'][1:]
 # idxs=Functions.find_idx(schedule,leg_funding.fix_dates)
-
-# print(model)
-# grid=np.arange(0,10,1)
-# print([model.var_(t) for t in grid])
-
-
-# fixgrid=np.array([max(0,cal.yearFraction(calc_date,x)) for x in leg_funding.fix_dates ])
-
-# print(np.mean(rates[:,idxs],axis=0))
-
-# fwds=model.compute_deposit_from_rates(rates[:,idxs],fixgrid,'3M')
-# fwds1=np.array([model.compute_deposit_from_rates(rates[:,i],t,'3M') for i,t in zip(idxs,fixgrid) ])
-
-# test=np.mean(fwds,axis=0)
-# test1=np.mean(fwds1,axis=1).ravel()
-
-# print(pd.DataFrame({'grid':fixgrid,'1':test,'2':test1}))

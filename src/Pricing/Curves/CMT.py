@@ -7,7 +7,6 @@ from scipy.interpolate import CubicSpline
 from Pricing.Utilities import Data_File,InputConverter
 from Pricing.Curves import Classic
 
-
 class Curve(Classic.Curve):
     def __init__(self,calc_date:ql.Date,cur_name:str,instruments:list):
         super().__init__(calc_date,cur_name,instruments)
@@ -39,8 +38,8 @@ class Curve(Classic.Curve):
             for i,d in enumerate(dates):
                 start=d+ql.Period('2D')
                 schedule= list(ql.MakeSchedule(start,start+ql.Period(tenor),ql.Period('1Y')))[1:]
-                P=self.discount_factor(schedule)
-                res[i]=(P[0]-P[-1])/np.sum(P[1:])
+                zc=self.discount_factor(schedule)
+                res[i]=(zc[0]-zc[-1])/np.sum(zc[1:])
         
             return res
         
@@ -79,7 +78,6 @@ def sort_and_select_instruments(calc_date:ql.Date,df:pd.DataFrame,tag=str)-> lis
         res.float_schedule=list(ql.MakeSchedule(calc_date+ql.Period("2D"),
                                                 res.maturity_date,ql.Period(float_freq)))[1:]
         return res
-
 
     mask_deposit=Data_File.select_row_from_keywords(df,'Description',keywords=('EUR','Deposit'))
     mask_swap=Data_File.select_row_from_keywords(df,'Description',keywords=('EUR','Basis_swap',tag))

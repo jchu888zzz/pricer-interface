@@ -21,23 +21,29 @@ mkt_data=GetResults.retrieve_data(path_folder=DataPath,date=calc_date)
 #select test from contracts
 input=test_autocall_swap
 
-prep_model=HullWhite.get_model(mkt_data['calc_date'],mkt_data,input['param']['currency'])
+# prep_model=HullWhite.get_model(mkt_data['calc_date'],mkt_data,input['param']['currency'])
+# AUTOCALL_MAPPING={'Autocall':Autocall.precomputation,
+#                     'Tarn':TARN.precomputation}
 
+# CALLABLE_MAPPING={'Digit':Digit.precomputation,
+#                     'RangeAccrual':RangeAccrual.precomputation,
+#                     'FixedRate':FixedRate.precomputation,
+#                     'MinMax':MinMax.precomputation}
 
-AUTOCALL_MAPPING={'Autocall':Autocall.precomputation,
-                    'Tarn':TARN.precomputation}
+# if input['_source_tab'] in ['Autocall','Tarn']:
+#     dic_prep=AUTOCALL_MAPPING.get(input['_source_tab'])(prep_model['calc_date'],
+#                                                         prep_model['model'],input['param'])
+# else:
+#     dic_prep=CALLABLE_MAPPING.get(input['_source_tab'])(prep_model['calc_date'],
+#                                                         prep_model['model'],input['param'],
+#                                                         prep_model['risky_curve'],risky=True)
 
-CALLABLE_MAPPING={'Digit':Digit.precomputation,
-                    'RangeAccrual':RangeAccrual.precomputation,
-                    'FixedRate':FixedRate.precomputation,
-                    'MinMax':MinMax.precomputation}
+# funding_leg=dic_prep['funding_leg']
+# import numpy as np
+# print(np.mean(funding_leg.fwds,axis=0))
+# spread=0.0075
+# cashflows= funding_leg.compute_cashflows(spread)
+# print(np.mean(cashflows,axis=0))
 
-if input['_source_tab'] in ['Autocall','Tarn']:
-    dic_prep=AUTOCALL_MAPPING.get(input['_source_tab'])(prep_model['calc_date'],
-                                                        prep_model['model'],input['param'])
-else:
-    dic_prep=CALLABLE_MAPPING.get(input['_source_tab'])(prep_model['calc_date'],
-                                                        prep_model['model'],input['param'],
-                                                        prep_model['risky_curve'],risky=True)
-
-
+input,res=GetResults.compute_result_rate(mkt_data,input)
+Display.display_pricing_results(res)
