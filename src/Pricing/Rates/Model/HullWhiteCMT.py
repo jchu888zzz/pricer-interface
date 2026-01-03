@@ -154,81 +154,110 @@ class HW_CMT:
         else:
             raise ValueError(f'compute_cmt_from_rates: {option} not implemented')
     
-    def compute_single_undl_from_rates(self,data_rates:dict,fix_dates:list[ql.Date],undl1:str,include_rates=True) ->tuple[np.ndarray]:
-        """ result shape (len(fixgrid),nb simu)"""
-        tenor1=DIC_UNDL[undl1]['tenor']
-        rates_cmt=select_rates(data_rates['rates'],data_rates['schedule'],fix_dates,None)
-        fixgrid=[self.curve.calendar.yearFraction(self.curve.calc_date,d) for d in fix_dates]
-        undl=np.array([self.compute_cmt_from_rates(rates_cmt[i],fixgrid[i],tenor1,'adjusted') for i in range(len(fixgrid))])
+    def compute_single_undl_from_rates(self, data_rates:dict, fix_dates:list[ql.Date], undl1:str,
+                                        nb_sub_fix_points:int|None=None, include_rates=True) -> dict:
+        """
+        Compute CMT underlying rates from simulated short rates.
 
-        if not include_rates:
-            return {'undl':undl}
+        Args:
+            nb_sub_fix_points: If None, returns shape (len(fix_dates), nb_simu)
+                              If int, returns shape (len(fix_dates)-1, nb_sub_fix_points, nb_simu)
+        """
+        tenor1 = DIC_UNDL[undl1]['tenor']
+        nb_simu=data_rates['rates'].shape[0]
+        calendar = self.curve.calendar
+        calc_date = self.curve.calc_date
+
+        if nb_sub_fix_points is None:
+            # Simple case: one rate per fix date
+            rates_cmt = select_rates(data_rates['rates_cmt'], data_rates['schedule'], fix_dates, None)
+            fixgrid = np.array([calendar.yearFraction(calc_date, d) for d in fix_dates])
+
+            undl = np.array([self.compute_cmt_from_rates(rates_cmt[i], t, tenor1, 'adjusted')
+                           for i, t in enumerate(fixgrid)])
+
+            result = {'undl': undl, 'nbsimu': nb_simu}
+            if include_rates:
+                rates = select_rates(data_rates['rates'], data_rates['schedule'], fix_dates, None)
+                result['rates'] = rates
+            return result
         else:
-            rates=select_rates(data_rates['rates'],data_rates['schedule'],fix_dates,None)
-            return {'undl':undl,'rates':rates}
+            # Depth case: subdivide periods
+            rates_cmt = select_rates(data_rates['rates_cmt'], data_rates['schedule'], fix_dates, nb_sub_fix_points)
+            n_periods = len(fix_dates) - 1
 
-    #Only CMT -CMS
-    def compute_spread_undl_from_rates(self,data_rates:dict,fix_dates:list[ql.Date],
-                                       undl1:str,undl2:str,include_rates=True) ->tuple[np.ndarray]:
-        """ result shape (len(fixgrid),nb simu)"""
-        tenor1=DIC_UNDL[undl1]['tenor']
-        cur2,rate_type2,tenor2=undl2.split()
+            # Pre-compute all sub-schedules and fixgrids
+            sub_fixgrids = [np.array([calendar.yearFraction(calc_date, d)
+                                     for d in Dates.ql_linspace(fix_dates[i], fix_dates[i+1], nb_sub_fix_points)])
+                          for i in range(n_periods)]
 
-        rates_cmt=select_rates(data_rates['rates_cmt'],data_rates['schedule'],fix_dates,None)
-        rates=select_rates(data_rates['rates'],data_rates['schedule'],fix_dates,None)
-        
-        model_rate=self.model_rate
-        fixgrid=[self.curve.calendar.yearFraction(self.curve.calc_date,d) for d in fix_dates]
-        undl=np.array([self.compute_cmt_from_rates(rates_cmt[i],fixgrid[i],tenor1,option='adjusted')-
-                       model_rate.compute_cms_from_rates(rates[i],fixgrid[i],tenor2,
-                                                         _DIC_FREQ_SWAPTION[cur2]["delta_fix"],
-                                                         _DIC_FREQ_SWAPTION[cur2]["delta_float"]) for i in range(len(fixgrid))])
+            # Compute rates for each period
+            res=np.zeros((n_periods, nb_sub_fix_points, nb_simu))
+            for i in range(n_periods):
+                res[i] = np.array([self.compute_cmt_from_rates(rates_cmt[i][j], t, tenor1, 'adjusted')
+                         for j, t in enumerate(sub_fixgrids[i])])
 
-        if not include_rates:
-            return {'undl':undl,'nbsimu':rates.shape[1]}
+            result = {'undl': res, 'nbsimu': nb_simu}
+            if include_rates:
+                rates = select_rates(data_rates['rates'], data_rates['schedule'], fix_dates, nb_sub_fix_points)
+                result['rates'] = rates[:, -1, :]
+            return result
+
+    def compute_spread_undl_from_rates(self, data_rates:dict, fix_dates:list[ql.Date],
+                                       undl1:str, undl2:str, nb_sub_fix_points:int|None=None,
+                                       include_rates=True) -> dict:
+        """
+        Compute CMT-CMS spread from simulated short rates.
+
+        Args:
+            nb_sub_fix_points: If None, returns shape (len(fix_dates), nb_simu)
+                              If int, returns shape (len(fix_dates)-1, nb_sub_fix_points, nb_simu)
+        """
+        tenor1 = DIC_UNDL[undl1]['tenor']
+        cur2, _, tenor2 = undl2.split()
+        nb_simu=data_rates['rates'].shape[0]
+        delta_fix = _DIC_FREQ_SWAPTION[cur2]["delta_fix"]
+        delta_float = _DIC_FREQ_SWAPTION[cur2]["delta_float"]
+
+        calendar = self.curve.calendar
+        calc_date = self.curve.calc_date
+        model_rate = self.model_rate
+
+        if nb_sub_fix_points is None:
+            # Simple case: one rate per fix date
+            rates_cmt = select_rates(data_rates['rates_cmt'], data_rates['schedule'], fix_dates, None)
+            rates = select_rates(data_rates['rates'], data_rates['schedule'], fix_dates, None)
+            fixgrid = np.array([calendar.yearFraction(calc_date, d) for d in fix_dates])
+
+            undl = np.array([
+                self.compute_cmt_from_rates(rates_cmt[i], t, tenor1, option='adjusted') -
+                model_rate.compute_cms_from_rates(rates[i], t, tenor2, delta_fix, delta_float)
+                for i, t in enumerate(fixgrid)])
+
+            result = {'undl': undl, 'nbsimu': nb_simu}
+            if include_rates:
+                result['rates'] = rates
+            return result
         else:
-            return {'undl':undl,'rates':rates,'nbsimu':rates.shape[1]}
-        
-    def compute_single_undl_from_rates_with_depth(self,data_rates:dict,fix_dates:list[ql.Date],undl1:str,nb_sub_fix_points:int,
-                                                  include_rates=True)->np.ndarray:
-        """ result shape (len(fixgrid),fixing_depth,nb simu)"""
-        tenor1=DIC_UNDL[undl1]['tenor']
-        rates_cmt=select_rates(data_rates['rates_cmt'],data_rates['schedule'],fix_dates,nb_sub_fix_points)
-        rates=select_rates(data_rates['rates'],data_rates['schedule'],fix_dates,nb_sub_fix_points)
+            # Depth case: subdivide periods
+            rates_cmt = select_rates(data_rates['rates_cmt'], data_rates['schedule'], fix_dates, nb_sub_fix_points)
+            rates = select_rates(data_rates['rates'], data_rates['schedule'], fix_dates, nb_sub_fix_points)
+            n_periods = len(fix_dates) - 1
 
-        res=np.zeros_like(rates_cmt)
-        
-        for i,(d1,d2) in enumerate(zip(fix_dates,fix_dates[1:])):
-            sub_schedule=Dates.ql_linspace(d1,d2,nb_sub_fix_points)
-            sub_fixgrid=(self.curve.calendar.yearFraction(self.curve.calc_date,d) for d in sub_schedule)
-            res[i]=np.array([ self.compute_cmt_from_rates(rates_cmt[i][j],t,tenor1,'adjusted') for j,t in enumerate(sub_fixgrid)])
-        
-        if not include_rates:
-            return {'undl':res,'nbsimu':data_rates['rates'].shape[1]}
-        else:
-            return {'undl':res,'rates':rates[:,-1,:],'nbsimu':rates.shape[1]}
-    
-    #Only CMT -CMS
-    def compute_spread_undl_from_rates_with_depth(self,data_rates:dict,fix_dates:list[ql.Date],undl1:str,
-                                                  undl2:str,nb_sub_fix_points:int,include_rates=True)->np.ndarray:
-        """ result shape (len(fixgrid),fixing_depth,nb simu)"""
-        tenor1=DIC_UNDL[undl1]['tenor']
-        cur2,rate_type2,tenor2=undl2.split()
+            # Pre-compute all sub-schedules and fixgrids
+            sub_fixgrids = [np.array([calendar.yearFraction(calc_date, d)
+                                     for d in Dates.ql_linspace(fix_dates[i], fix_dates[i+1], nb_sub_fix_points)])
+                          for i in range(n_periods)]
 
-        rates_cmt=select_rates(data_rates['rates_cmt'],data_rates['schedule'],fix_dates,nb_sub_fix_points)
-        rates=select_rates(data_rates['rates'],data_rates['schedule'],fix_dates,nb_sub_fix_points)
-        res=np.zeros_like(rates_cmt)
-        model_rate=self.model_rate
+            # Compute spread for each period
+            res=np.zeros((n_periods, nb_sub_fix_points, nb_simu))
+            for i in range(n_periods):
+                res[i]=np.array([
+                    self.compute_cmt_from_rates(rates_cmt[i][j], t, tenor1, 'adjusted') -
+                    model_rate.compute_cms_from_rates(rates[i][j], t, tenor2, delta_fix, delta_float)
+                    for j, t in enumerate(sub_fixgrids[i])])
 
-        for i,(d1,d2) in enumerate(zip(fix_dates,fix_dates[1:])):
-            sub_schedule=Dates.ql_linspace(d1,d2,nb_sub_fix_points)
-            sub_fixgrid=(self.curve.calendar.yearFraction(self.curve.calc_date,d) for d in sub_schedule)
-            res[i]=np.array([ self.compute_cmt_from_rates(rates_cmt[i][j],t,tenor1,'adjusted')-
-                             model_rate.compute_cms_from_rates(rates[i][j],t,tenor2,
-                                                               _DIC_FREQ_SWAPTION[cur2]["delta_fix"],
-                                                               _DIC_FREQ_SWAPTION[cur2]["delta_ffloat"]) for j,t in enumerate(sub_fixgrid)])
-
-        if not include_rates:
-            return {'undl':res,'nbsimu':data_rates['rates'].shape[1]}
-        else:
-            return {'undl':res,'rates':rates[:,-1,:],'nbsimu':rates.shape[1]}
+            result = {'undl': res, 'nbsimu': nb_simu}
+            if include_rates:
+                result['rates'] = rates[:, -1, :]
+            return result

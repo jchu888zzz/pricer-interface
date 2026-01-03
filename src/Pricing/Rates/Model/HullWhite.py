@@ -225,49 +225,63 @@ class HW :
     def select_rates(self,data_rates:dict,fix_dates:list[ql.Date]) -> np.ndarray:
         return select_rates(data_rates['rates'],data_rates['schedule'],fix_dates)
     
-    def compute_single_undl_from_rates(self,data_rates:dict,fix_dates:list[ql.Date],undl1:str,include_rates=True) ->dict:
-        """ result shape (len(fixgrid),nb simu)"""
-        cur1,rate_type1,tenor1=undl1.split()
-        rates=select_rates(data_rates['rates'],data_rates['schedule'],fix_dates,None)
-        fixgrid=[self.curve.calendar.yearFraction(self.curve.calc_date,d) for d in fix_dates]
-        if rate_type1=="CMS":
-            undl=np.array([self.compute_cms_from_rates(rates[i],t,tenor1,
-                                                       _DIC_FREQ_SWAPTION[cur1]["delta_fix"],
-                                                       _DIC_FREQ_SWAPTION[cur1]["delta_float"])
-                                                         for i,t in enumerate(fixgrid)])
-        elif rate_type1=="Euribor":
-            undl=np.array([self.compute_deposit_from_rates(rates[i],t,tenor1) for i,t in enumerate(fixgrid)])
+    def compute_single_undl_from_rates(self,data_rates:dict,fix_dates:list[ql.Date],undl1:str,
+                                        nb_sub_fix_points:int|None=None,include_rates=True) ->dict:
+        """
+        compute underlying rates from simulated short rates.
+        Args:
+            nb_sub_fix_points: If None, returns shape (len(fix_dates), nb_simu)
+                              If int, returns shape (len(fix_dates)-1, nb_sub_fix_points, nb_simu)
+        """
+        cur1, rate_type1, tenor1 = undl1.split()
+        nb_simu=data_rates['rates'].shape[0]
+        # Get rate computation function based on type
+        if rate_type1 == "CMS":
+            delta_fix = _DIC_FREQ_SWAPTION[cur1]["delta_fix"]
+            delta_float = _DIC_FREQ_SWAPTION[cur1]["delta_float"]
+            compute_rate = lambda r, t: self.compute_cms_from_rates(r, t, tenor1, delta_fix, delta_float)
+        elif rate_type1 == "Euribor":
+            compute_rate = lambda r, t: self.compute_deposit_from_rates(r, t, tenor1)
         else:
             raise ValueError(f"{rate_type1} not implemented")
-        if not include_rates:
-            return {'undl':undl,'nbsimu':rates.shape[1]}
+
+        calendar = self.curve.calendar
+        calc_date = self.curve.calc_date
+
+        if nb_sub_fix_points is None:
+            # Simple case: one rate per fix date
+            rates = select_rates(data_rates['rates'], data_rates['schedule'], fix_dates, None)
+            fixgrid = np.array([calendar.yearFraction(calc_date, d) for d in fix_dates])
+
+            # Vectorized computation where possible
+            undl = np.array([compute_rate(rates[i], t) for i, t in enumerate(fixgrid)])
+
+            result = {'undl': undl, 'nbsimu': nb_simu}
+            if include_rates:
+                result['rates'] = rates
+            return result
         else:
-            return {'undl':undl,'nbsimu':rates.shape[1],'rates':rates}
-    
-    def compute_single_undl_from_rates_with_depth(self,data_rates:dict,fix_dates:list[ql.Date],undl1:str,nb_sub_fix_points:int,
-                                                    include_rates=True)->dict:
-        """ result shape (len(fixgrid),fixing_depth,nb simu)"""
-        cur1,rate_type1,tenor1=undl1.split()
-        rates=select_rates(data_rates['rates'],data_rates['schedule'],fix_dates,nb_sub_fix_points)
-        res=[]
-        
-        for i,(d1,d2) in enumerate(zip(fix_dates,fix_dates[1:])):
-            sub_schedule=Dates.ql_linspace(d1,d2,nb_sub_fix_points)
-            sub_fixgrid=(self.curve.calendar.yearFraction(self.curve.calc_date,d) for d in sub_schedule)
-            if rate_type1=="CMS":
-                res.append(np.array([ self.compute_cms_from_rates(rates[i][j],t,tenor1,
-                                                                _DIC_FREQ_SWAPTION[cur1]["delta_fix"],
-                                                                _DIC_FREQ_SWAPTION[cur1]["delta_float"]) 
-                                for j,t in enumerate(sub_fixgrid)]))
-            elif rate_type1=="Euribor":
-                res.append(np.array([ self.compute_deposit_from_rates(rates[i][j],t,tenor1) 
-                                for  j,t in enumerate(sub_fixgrid)]))
-        
-        if not include_rates:
-            return {'undl':np.array(res),'nbsimu':data_rates['rates'].shape[1]}
-        else:
-            return {'undl':np.array(res),'nbsimu':data_rates['rates'].shape[1],'rates':rates[:,-1,:]}
-            
+            # Depth case: subdivide periods
+            rates = select_rates(data_rates['rates'], data_rates['schedule'], fix_dates, nb_sub_fix_points)
+            n_periods = len(fix_dates) - 1
+
+            # Pre-compute all sub-schedules and fixgrids
+            sub_schedules = [Dates.ql_linspace(fix_dates[i], fix_dates[i+1], nb_sub_fix_points)
+                           for i in range(n_periods)]
+            sub_fixgrids = [np.array([calendar.yearFraction(calc_date, d) for d in sched])
+                          for sched in sub_schedules]
+
+            # Compute rates for each period
+            res=np.zeros((n_periods, nb_sub_fix_points, nb_simu))
+            for i in range(n_periods):
+                res[i]=np.array([compute_rate(rates[i][j], t) for j, t in enumerate(sub_fixgrids[i])])
+
+
+            result = {'undl': res, 'nbsimu': nb_simu}
+            if include_rates:
+                result['rates'] = rates[:, -1, :]
+            return result
+
     def compute_prep_for_swaption_from_rates(self,contract,data_rates:dict,
                                             daycount_calendar=ql.Thirty360(ql.Thirty360.BondBasis),
                                             include_rates=True) ->dict:

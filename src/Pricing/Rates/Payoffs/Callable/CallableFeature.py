@@ -66,7 +66,7 @@ def prep_callable_contract(calc_date:ql.Date,contract,model,risky_curve,risky:bo
 
     else:
         data_rates_helper=model.generate_rates(calc_date,contract.pay_dates[-1],cal=ql.Thirty360(ql.Thirty360.BondBasis),
-                                    Nbsimu=1000,seed=42)
+                                    Nbsimu=10000,seed=42)
         
         dic_arg_helper=Base.prep_undl(contract,model,data_rates_helper,include_rates=True)
         prep_discount_factor_from_rates(contract,model,risky_curve,dic_arg_helper,risky)

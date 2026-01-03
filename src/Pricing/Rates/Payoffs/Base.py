@@ -63,34 +63,29 @@ def compute_bond_measure_change(measure_change_factor:np.ndarray,stop_idxs:np.nd
     return res
 
 def prep_undl(contract,model,data_rates:dict,include_rates=True) -> dict:
-    if contract.hasunderlying :
-        if hasattr(contract,'fixing_depth'):
+    if contract.hasunderlying:
+        # Determine if we need depth (range accrual case)
+        nb_sub_fix_points = getattr(contract, 'fixing_depth', None)
+        fix_dates = np.insert(contract.fix_dates, 0, contract.issue_date) if nb_sub_fix_points else contract.fix_dates
 
-            fix_dates=np.insert(contract.fix_dates,0,contract.issue_date)
-            # only range accrual 
-            if contract.spreadunderlying:
-                dic_arg=model.compute_spread_undl_from_rates_with_depth(data_rates,fix_dates,
-                                                                        contract.underlying_name1,contract.underlying_name2,
-                                                                        nb_sub_fix_points=contract.fixing_depth,
-                                                                        include_rates=include_rates)
-            else:
-                dic_arg=model.compute_single_undl_from_rates_with_depth(data_rates,fix_dates,
-                                                                    contract.underlying_name1,
-                                                                    nb_sub_fix_points=contract.fixing_depth,
-                                                                    include_rates=include_rates)
-            densities=contract.compute_densities(dic_arg['undl'])
-            dic_arg.update({'undl':dic_arg['undl'][:,-1,:],'densities':densities})
-            return dic_arg
-
+        # Call the appropriate unified method
+        if contract.spreadunderlying:
+            dic_arg = model.compute_spread_undl_from_rates(data_rates, fix_dates,
+                                                           contract.underlying_name1, contract.underlying_name2,
+                                                           nb_sub_fix_points=nb_sub_fix_points,
+                                                           include_rates=include_rates)
         else:
-            if contract.spreadunderlying:
-                return model.compute_spread_undl_from_rates(data_rates,contract.fix_dates,
-                                                                contract.underlying_name1,contract.underlying_name2,
-                                                                include_rates=include_rates)
-            else:
-                return model.compute_single_undl_from_rates(data_rates,contract.fix_dates,
-                                                                contract.underlying_name1,
-                                                                include_rates=include_rates)
+            dic_arg = model.compute_single_undl_from_rates(data_rates, fix_dates,
+                                                           contract.underlying_name1,
+                                                           nb_sub_fix_points=nb_sub_fix_points,
+                                                           include_rates=include_rates)
+
+        # Post-process for range accrual (depth case)
+        if nb_sub_fix_points:
+            densities = contract.compute_densities(dic_arg['undl'])
+            dic_arg.update({'undl': dic_arg['undl'][:, -1, :], 'densities': densities})
+
+        return dic_arg
             
 class Payoff :
 
