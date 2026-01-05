@@ -1,6 +1,5 @@
 import numpy as np
 
-from scipy.interpolate import CubicSpline
 from scipy.special import ndtr  # Step 9: Faster than norm.cdf for arrays
 from scipy.optimize import brentq,least_squares,newton
 import QuantLib as ql
@@ -64,7 +63,6 @@ def Calibration(curve,instru_calib:list[Rate_Instruments.Swaption | Rate_Instrum
     swap_mkt = [item.mkt_price for item in Swaptions]
     cap_mkt = [item.mkt_price for item in Caps]
 
-
     def error_function(param:tuple[float]):
         model.a, model.sigma = param[0], param[1]
         for i in range(n_swap):
@@ -76,9 +74,10 @@ def Calibration(curve,instru_calib:list[Rate_Instruments.Swaption | Rate_Instrum
     optimizer=least_squares(error_function,x0=(0.02,0.02),bounds=([1e-5,1e-3],[0.5,np.sqrt(0.1)]))
 
     model=HW(curve,optimizer.x)
+    
     if Swaptions:
         model.cvx_adj_helper=CA.Helper(curve,Swaptions)
-
+    
     return model
 
 def select_rates(rates:np.ndarray,simu_dates:np.ndarray[ql.Date],fix_dates:np.ndarray[ql.Date],
@@ -207,9 +206,9 @@ class HW :
         return (1-P_term)/(P_term*h)
     
     def compute_cms_from_rates(self,rates:np.ndarray,t:float,tenor:str,
-                               delta_fix:float,delta_float:float) -> np.ndarray:
-        tenor=convert_period(tenor)
-        fix_tgrid=t+np.arange(0,tenor,delta_fix)
+                                delta_fix:float,delta_float:float) -> np.ndarray:
+        t_tenor=convert_period(tenor)
+        fix_tgrid=t+np.arange(0,t_tenor,delta_fix)
         P_fix=self.compute_discount_factor_from_rates(rates,t,fix_tgrid)
         delta=np.diff(fix_tgrid)
         lvl=np.sum(P_fix[:,1:]*delta,axis=1)
@@ -218,7 +217,7 @@ class HW :
         # float_tgrid=t+np.arange(0,tenor,delta_float)
         # P_float=self.compute_discount_factor_from_rates(rates,t,float_tgrid)
         # res=(P_float[:,0]-P_float[:,-1])/lvl
-        res+=self.cvx_adj_helper.compute_adjustment(t,tenor='10Y')
+        res+=self.cvx_adj_helper.compute_adjustment(t,tenor)
         return res
     
     #wrapper to select rates
@@ -231,7 +230,7 @@ class HW :
         compute underlying rates from simulated short rates.
         Args:
             nb_sub_fix_points: If None, returns shape (len(fix_dates), nb_simu)
-                              If int, returns shape (len(fix_dates)-1, nb_sub_fix_points, nb_simu)
+                            If int, returns shape (len(fix_dates)-1, nb_sub_fix_points, nb_simu)
         """
         cur1, rate_type1, tenor1 = undl1.split()
         nb_simu=data_rates['rates'].shape[0]
@@ -267,9 +266,9 @@ class HW :
 
             # Pre-compute all sub-schedules and fixgrids
             sub_schedules = [Dates.ql_linspace(fix_dates[i], fix_dates[i+1], nb_sub_fix_points)
-                           for i in range(n_periods)]
+                            for i in range(n_periods)]
             sub_fixgrids = [np.array([calendar.yearFraction(calc_date, d) for d in sched])
-                          for sched in sub_schedules]
+                            for sched in sub_schedules]
 
             # Compute rates for each period
             res=np.zeros((n_periods, nb_sub_fix_points, nb_simu))
@@ -326,6 +325,9 @@ class HW :
                 'nbsimu':rates.shape[1]}
 
         if not include_rates:
+            return dic_arg
+        else:
+            dic_arg.update({"rates":rates})
             return dic_arg
         else:
             dic_arg.update({"rates":rates})
