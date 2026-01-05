@@ -1,11 +1,3 @@
-import pandas as pd
-import QuantLib as ql
-import numpy as np
-from datetime import datetime
-
-import Pricing.Rates.Model.HullWhite as HullWhite
-from Pricing.Curves import Classic,CMT
-import Pricing.Rates.Instruments as Rate_Instruments
 from Pricing.Utilities import Dates,Functions
 
 DIC_UNDL={'BFRTEC10':{'tag':'BFR','tenor':'10Y','currency':'EUR','vol_shift':0.8},
@@ -43,46 +35,48 @@ def compute_correlation(df:pd.DataFrame,ticker1:str,ticker2:str) -> np.ndarray:
     def format(date:ql.Date)->datetime.date:
         return datetime(date.year(),date.month(),date.dayOfMonth()).date()
     
-    schedule=[format(x) for x in schedule ]
-    df=df.loc[[df.index[Functions.find_idx(df.index.map(lambda x: x.date()),x)] for x in schedule]]
+    schedule=np.array([format(x) for x in schedule ])
+    dates=np.array([x.date() for x in df.index])
+    idxs=Functions.find_idx(dates,schedule)
+    df=df.loc[df.index[idxs]]
     df=df.diff()
     df=df.dropna()
     res=np.corrcoef(df[ticker1].to_numpy(),df[ticker2].to_numpy())
     
     return res
 
-def get_model(dic_df:dict,undl:str,calc_date) -> dict:
+def get_model(calc_date:ql.Date,mkt_data:dict,currency:str,undl:str|None) -> dict:
 
     currency=DIC_UNDL[undl]['currency']
     tenor=DIC_UNDL[undl]['tenor']
     tag=DIC_UNDL[undl]['tag']
-    curve,risky_curve=Classic.get_curves(calc_date,dic_df,currency,'Classical')
+    curve,risky_curve=Classic.get_curves(calc_date,mkt_data,currency,'Classical')
 
-    swaptions_rate=Rate_Instruments.select_and_prepare_swaptions(dic_df['swaption'],curve,calc_date,currency)
+    swaptions_rate=Rate_Instruments.select_and_prepare_swaptions(mkt_data['swaption'],curve,calc_date,currency)
     swaptions_rate=[x for x in swaptions_rate if x.strike_type=='ATM' and x.tenor==tenor]
     model_rate=HullWhite.Calibration(curve,swaptions_rate)
 
-    cmt_curve=CMT.get_curve(calc_date,dic_df['cmt'],currency,tag)
+    cmt_curve=CMT.get_curve(calc_date,mkt_data['cmt'],currency,tag)
 
-    df_cmt=dic_df['swaption'].copy()
+    df_cmt=mkt_data['swaption'].copy()
     df_cmt['Quote']*=DIC_UNDL[undl]['vol_shift']
     swaptions_cmt=Rate_Instruments.select_and_prepare_swaptions(df_cmt,cmt_curve,calc_date,currency)
     swaptions_cmt=[x for x in swaptions_cmt if x.strike_type=='ATM' and x.tenor==tenor]
     model_cmt=HullWhite.Calibration(cmt_curve,swaptions_cmt)
 
-    # path="//Umilp-p2.cdm.cm-cic.fr/cic-lai-lae-cigogne$/1_Structuration/6_Lexifi/Snapshot_data/Historical_prices.xlsx"
-    # ticker1=undl+' Index'
-    # if currency=="USD":
-    #     ticker2="USISSO10 Index"
-    # elif currency=="EUR":
-    #     ticker2='EUAMDB10 Index'
-    # else:
-    #     raise ValueError(f'{currency} Not implemented')
+    path="//Umilp-p2.cdm.cm-cic.fr/cic-lai-lae-cigogne$/1_Structuration/6_Lexifi/Snapshot_data/Historical_prices.xlsx"
+    ticker1=undl+' Index'
+    if currency=="USD":
+        ticker2="USISSO10 Index"
+    elif currency=="EUR":
+        ticker2='EUAMDB10 Index'
+    else:
+        raise ValueError(f'{currency} Not implemented')
 
-    # cov_matrix=compute_correlation(pd.read_excel(path,sheet_name='Rate Undl',index_col=0),
-    #                                         ticker1,ticker2)
+    cov_matrix=compute_correlation(pd.read_excel(path,sheet_name='Rate Undl',index_col=0),
+                                            ticker1,ticker2)
 
-    cov_matrix=np.array([[1,0.8],[0.8,1]])
+    # cov_matrix=np.array([[1,0.8],[0.8,1]])
 
     model=HW_CMT(model_rate,model_cmt,cov_matrix)
     return {'risky_curve':risky_curve,
@@ -102,7 +96,7 @@ class HW_CMT:
         self.cov_matrix=cov_matrix
     
     def generate_rates(self,calc_date:ql.Date,maturity_date:ql.Date,
-                       cal=ql.Thirty360(ql.Thirty360.BondBasis),Nbsimu=10000,seed=5) -> dict:
+                        cal=ql.Thirty360(ql.Thirty360.BondBasis),Nbsimu=10000,seed=5) -> dict:
 
         rng=np.random.default_rng(int(seed))
         T_maturity=cal.yearFraction(calc_date,maturity_date)
@@ -128,20 +122,20 @@ class HW_CMT:
             alpha=model_rate.alpha_T(grid[i],T_maturity)
             var=model_rate.var_(grid[i])
             rates[:,i]=( rates[:,i-1]*np.exp(-model_rate.a*delta) +alpha - prev_alpha*np.exp(-model_rate.a*delta) +
-                      np.sqrt(var-prev_var*np.exp(-2*model_rate.a*delta))*Z[:,:,0][i] )
+                        np.sqrt(var-prev_var*np.exp(-2*model_rate.a*delta))*Z[:,:,0][i] )
             prev_alpha=alpha
             prev_var=var
 
             alpha_cmt=model_cmt.alpha_T(grid[i],T_maturity)
             var_cmt=model_cmt.var_(grid[i])
             rates_cmt[:,i]=( rates_cmt[:,i-1]*np.exp(-model_cmt.a*delta) +alpha_cmt - prev_alpha_cmt*np.exp(-model_cmt.a*delta) +
-                      np.sqrt(var_cmt-prev_var_cmt*np.exp(-2*model_cmt.a*delta))*Z[:,:,1][i] )
+                        np.sqrt(var_cmt-prev_var_cmt*np.exp(-2*model_cmt.a*delta))*Z[:,:,1][i] )
             prev_alpha_cmt=alpha_cmt
             prev_var_cmt=var_cmt
 
         return {'rates':rates,'rates_cmt':rates_cmt,'schedule':schedule}
     
-    def compute_cmt_from_rates(self,rates_cmt:np.ndarray,t:float,tenor1:str,option='adjusted'):
+    def compute_cmt_from_rates(self,rates_cmt:np.ndarray,t:float,tenor1:str,option:str):
         model_cmt=self.model_cmt
         curve_cmt=model_cmt.curve
         if option=='unadjusted':
@@ -155,13 +149,14 @@ class HW_CMT:
             raise ValueError(f'compute_cmt_from_rates: {option} not implemented')
     
     def compute_single_undl_from_rates(self, data_rates:dict, fix_dates:list[ql.Date], undl1:str,
-                                        nb_sub_fix_points:int|None=None, include_rates=True) -> dict:
+                                        nb_sub_fix_points:int|None=None, include_rates=True,
+                                        option='adjusted') -> dict:
         """
         Compute CMT underlying rates from simulated short rates.
 
         Args:
             nb_sub_fix_points: If None, returns shape (len(fix_dates), nb_simu)
-                              If int, returns shape (len(fix_dates)-1, nb_sub_fix_points, nb_simu)
+                                If int, returns shape (len(fix_dates)-1, nb_sub_fix_points, nb_simu)
         """
         tenor1 = DIC_UNDL[undl1]['tenor']
         nb_simu=data_rates['rates'].shape[0]
@@ -173,8 +168,8 @@ class HW_CMT:
             rates_cmt = select_rates(data_rates['rates_cmt'], data_rates['schedule'], fix_dates, None)
             fixgrid = np.array([calendar.yearFraction(calc_date, d) for d in fix_dates])
 
-            undl = np.array([self.compute_cmt_from_rates(rates_cmt[i], t, tenor1, 'adjusted')
-                           for i, t in enumerate(fixgrid)])
+            undl = np.array([self.compute_cmt_from_rates(rates_cmt[i], t, tenor1, option)
+                            for i, t in enumerate(fixgrid)])
 
             result = {'undl': undl, 'nbsimu': nb_simu}
             if include_rates:
@@ -187,15 +182,14 @@ class HW_CMT:
             n_periods = len(fix_dates) - 1
 
             # Pre-compute all sub-schedules and fixgrids
-            sub_fixgrids = [np.array([calendar.yearFraction(calc_date, d)
-                                     for d in Dates.ql_linspace(fix_dates[i], fix_dates[i+1], nb_sub_fix_points)])
-                          for i in range(n_periods)]
 
             # Compute rates for each period
             res=np.zeros((n_periods, nb_sub_fix_points, nb_simu))
             for i in range(n_periods):
-                res[i] = np.array([self.compute_cmt_from_rates(rates_cmt[i][j], t, tenor1, 'adjusted')
-                         for j, t in enumerate(sub_fixgrids[i])])
+                sub_fixgrids=(calendar.yearFraction(calc_date, d)
+                                        for d in Dates.ql_linspace(fix_dates[i], fix_dates[i+1], nb_sub_fix_points))
+                res[i] = np.array([self.compute_cmt_from_rates(rates_cmt[i][j], t, tenor1,option)
+                            for j, t in enumerate(sub_fixgrids)])
 
             result = {'undl': res, 'nbsimu': nb_simu}
             if include_rates:
@@ -204,14 +198,14 @@ class HW_CMT:
             return result
 
     def compute_spread_undl_from_rates(self, data_rates:dict, fix_dates:list[ql.Date],
-                                       undl1:str, undl2:str, nb_sub_fix_points:int|None=None,
-                                       include_rates=True) -> dict:
+                                        undl1:str, undl2:str, nb_sub_fix_points:int|None=None,
+                                        include_rates=True,option='adjusted') -> dict:
         """
         Compute CMT-CMS spread from simulated short rates.
 
         Args:
             nb_sub_fix_points: If None, returns shape (len(fix_dates), nb_simu)
-                              If int, returns shape (len(fix_dates)-1, nb_sub_fix_points, nb_simu)
+                                If int, returns shape (len(fix_dates)-1, nb_sub_fix_points, nb_simu)
         """
         tenor1 = DIC_UNDL[undl1]['tenor']
         cur2, _, tenor2 = undl2.split()
@@ -230,7 +224,7 @@ class HW_CMT:
             fixgrid = np.array([calendar.yearFraction(calc_date, d) for d in fix_dates])
 
             undl = np.array([
-                self.compute_cmt_from_rates(rates_cmt[i], t, tenor1, option='adjusted') -
+                self.compute_cmt_from_rates(rates_cmt[i], t, tenor1, option) -
                 model_rate.compute_cms_from_rates(rates[i], t, tenor2, delta_fix, delta_float)
                 for i, t in enumerate(fixgrid)])
 
@@ -244,18 +238,15 @@ class HW_CMT:
             rates = select_rates(data_rates['rates'], data_rates['schedule'], fix_dates, nb_sub_fix_points)
             n_periods = len(fix_dates) - 1
 
-            # Pre-compute all sub-schedules and fixgrids
-            sub_fixgrids = [np.array([calendar.yearFraction(calc_date, d)
-                                     for d in Dates.ql_linspace(fix_dates[i], fix_dates[i+1], nb_sub_fix_points)])
-                          for i in range(n_periods)]
-
             # Compute spread for each period
             res=np.zeros((n_periods, nb_sub_fix_points, nb_simu))
             for i in range(n_periods):
+                sub_fixgrids=(calendar.yearFraction(calc_date, d)
+                                        for d in Dates.ql_linspace(fix_dates[i], fix_dates[i+1], nb_sub_fix_points))
                 res[i]=np.array([
-                    self.compute_cmt_from_rates(rates_cmt[i][j], t, tenor1, 'adjusted') -
+                    self.compute_cmt_from_rates(rates_cmt[i][j], t, tenor1,option) -
                     model_rate.compute_cms_from_rates(rates[i][j], t, tenor2, delta_fix, delta_float)
-                    for j, t in enumerate(sub_fixgrids[i])])
+                    for j, t in enumerate(sub_fixgrids)])
 
             result = {'undl': res, 'nbsimu': nb_simu}
             if include_rates:
