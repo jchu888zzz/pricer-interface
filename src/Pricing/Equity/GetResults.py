@@ -1,7 +1,7 @@
 import numpy as np
 import QuantLib as ql
 
-import EQDataPrep
+from Pricing.Equity import EQDataPrep
 from Pricing.Equity.Model import HestonModel
 
 def get_callprobas(S_fix, call_lvl, S0):
@@ -24,9 +24,9 @@ def geteq_fund2(T_pay, probas, fund_curve, discount):
 
 def compute_result(input:dict):
     
-    _input=EQDataPrep.convert_input(input)
+    _input=EQDataPrep.convert_input(input['param'])
     pay_dates = list(ql.Schedule(_input["start_date"], _input["start_date"] + ql.Period(_input["mat"], ql.Years), ql.Period(_input["freq"]), 
-                                 ql.TARGET(), ql.Following, ql.Following, ql.DateGeneration.Forward, False))[1 + _input["per_nocall"]:]
+                                ql.TARGET(), ql.Following, ql.Following, ql.DateGeneration.Forward, False))[1 + _input["per_nocall"]:]
     fix_dates = list(map(lambda date: ql.TARGET().advance(date, _input["offset"], ql.Days), pay_dates))
     T_pay = np.array(list(map(lambda date: ql.Actual365Fixed().yearFraction(_input["value_date"], date), pay_dates)))
     T_fix = np.array(list(map(lambda date: ql.Actual365Fixed().yearFraction(_input["value_date"], date), fix_dates)))
@@ -47,11 +47,11 @@ def compute_result(input:dict):
     new_spreads, new_fund = geteq_fund2(T_pay, probas, _input["fund_curve"], discount)
 
     res= {"duration": duration,
-         "funding_spread": new_fund,
-         "table":{"Payment Dates":pay_dates,
-                  "Early Redemption Proba":probas,
-                  "Model Forward":_input["forward"](T_pay),
-                  "Zero Coupon":_input["df"](T_pay)}
+        "funding_spread": new_fund,
+        "table":{"Payment Dates":pay_dates,
+                "Early Redemption Proba":probas,
+                "Model Forward":_input["forward"](T_pay),
+                "Zero Coupon":_input["df"](T_pay)}
         }
 
-    return res
+    return input,res
