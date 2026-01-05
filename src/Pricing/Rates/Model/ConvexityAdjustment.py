@@ -2,7 +2,6 @@ import numpy as np
 import QuantLib as ql
 import re
 
-from Pricing.Rates.Instruments import Swaption
 import Pricing.Rates.Instruments as Rate_Instruments
 from Pricing.Curves import Classic
 
@@ -99,4 +98,5 @@ class Helper:
 
         # Return scalar if input was scalar
         return adjustment[0] if is_scalar else adjustment
+
 
