@@ -8,43 +8,54 @@ from Pricing.Rates import Funding
 from . import CallableFeature
 
 def precomputation(calc_date:ql.Date,model,data:dict[str:str],risky_curve,risky:bool):
-
     contract=FixedRate(data)
     contract._update(calc_date,cal=ql.Thirty360(ql.Thirty360.BondBasis))
     contract.compute_funding_adjustment(calc_date)
     data_rates=model.generate_rates(calc_date,contract.pay_dates[-1],
                                     cal=ql.Thirty360(ql.Thirty360.BondBasis),Nbsimu=10000,seed=0)
     
-    dic_arg=model.compute_prep_for_swaption_from_rates(contract,data_rates,
-                                            daycount_calendar=ql.Thirty360(ql.Thirty360.BondBasis),
-                                            include_rates=True)
-    CallableFeature.prep_discount_factor_from_rates(contract,model,risky_curve,dic_arg,risky)
-
     res=dict()
     if contract.structure_type=='Swap':
         funding_leg=Funding.Leg(contract,contract.currency)
         funding_leg.precomputation(calc_date,model,data_rates)
         res.update({'funding_leg':funding_leg})
-
-    data_rates_helper=model.generate_rates(calc_date,contract.pay_dates[-1],cal=ql.Thirty360(ql.Thirty360.BondBasis),
-                                    Nbsimu=1000,seed=42)
+    
+    if not hasattr(contract,'call_dates'):
         
-    dic_arg_helper=model.compute_prep_for_swaption_from_rates(contract,data_rates_helper,
+        contract.proba_recall=np.zeros_like(contract.pay_dates)
+        contract.proba_recall[-1]=1
+        contract.res_capital=contract.proba_recall
+        contract.duration=contract.paygrid[-1]
+        contract.funding_spread=Base.get_funding_spread(risky_curve,
+                                                        contract.pay_dates[-1],
+                                                        contract.funding_adjustment)
+        res.update({'contract':contract,
+                    'dic_arg':{'nbsimu':data_rates['rates'].shape[0]}})
+        return res
+
+    dic_arg=model.compute_prep_for_swaption_from_rates(contract,data_rates,
                                             daycount_calendar=ql.Thirty360(ql.Thirty360.BondBasis),
                                             include_rates=True)
+    CallableFeature.prep_discount_factor_from_rates(contract,model,risky_curve,dic_arg,risky)
+    data_rates_helper=model.generate_rates(calc_date,contract.pay_dates[-1],cal=ql.Thirty360(ql.Thirty360.BondBasis),
+                                Nbsimu=1000,seed=42)
+    
+    dic_arg_helper=model.compute_prep_for_swaption_from_rates(contract,data_rates_helper,
+                                        daycount_calendar=ql.Thirty360(ql.Thirty360.BondBasis),
+                                        include_rates=True)
     CallableFeature.prep_discount_factor_from_rates(contract,model,risky_curve,dic_arg_helper,risky)
 
     contract.paygrid=[risky_curve.calendar.yearFraction(risky_curve.calc_date,d) for d in contract.pay_dates]
     measure_change_factor=np.array([Base.compute_measure_change_factor(model,dic_arg['rates'][i],t,contract.paygrid[-1]) 
-                                    for i,t in enumerate(contract.paygrid) ])
+                                for i,t in enumerate(contract.paygrid) ])
     dic_arg['measure_change_factor']=measure_change_factor
 
     res.update({'contract':contract,
-                'dic_arg_helper':dic_arg_helper,
-                'dic_arg':dic_arg})
+            'dic_arg_helper':dic_arg_helper,
+            'dic_arg':dic_arg})
     return res
 
-REGRESSOR_CLASS=Ridge(alpha=5.0)
+REGRESSOR_CLASS=Ridge(alpha=0.5,fit_intercept=True)
 def compute_price(dic_prep:dict,risky_curve):
     return CallableFeature.compute_price(dic_prep,risky_curve,
                                             basis_option='polynomial',
@@ -55,28 +66,6 @@ def solve_coupon(dic_prep:dict,risky_curve):
                                         basis_option='polynomial',
                                         regressor_class=REGRESSOR_CLASS)
 
-
-class Process :
-    def compute_price(prep_model:dict,param_contract:dict):
-        dic_prep=precomputation(prep_model['calc_date'],prep_model['model'],
-                                param_contract,prep_model['risky_curve'],risky=True)
-
-        return compute_price(dic_prep,prep_model['risky_curve'])
-        
-    def solve_coupon(prep_model:dict,param_contract:dict):
-        dic_prep=precomputation(prep_model['calc_date'],prep_model['model'],
-                                param_contract,prep_model['risky_curve'],risky=True)
-        
-        def update_dic_prep(coupon,spread) ->dict:
-            dic_prep_new=dic_prep.copy()
-            dic_prep_new['contract'].coupon=coupon
-            dic_prep_new['contract'].funding_spread=spread
-            return dic_prep_new
-
-        coupon,spread=solve_coupon(dic_prep,prep_model['risky_curve'])
-        dic_prep_new=update_dic_prep(coupon,spread)
-        return compute_price(dic_prep_new,prep_model['risky_curve'])
-
 class FixedRate(Base.Payoff) :
 
     def __init__(self,parameters:dict):
@@ -86,7 +75,7 @@ class FixedRate(Base.Payoff) :
 
     def compute_cashflows(self,dic_arg:dict):
         coupon=dic_arg['x']
-        nb_simu=dic_arg['rates'].shape[1]
+        nb_simu=dic_arg['nbsimu']
         res=coupon*self.delta
 
         if self.infine:
@@ -94,7 +83,12 @@ class FixedRate(Base.Payoff) :
         else:
             return np.tile(res,(nb_simu,1))
         
-    def update_arg_pricing(self,coupon:float,dic_arg:dict,side:str='sell') -> dict:
+    def update_arg_pricing(self,coupon:float,dic_arg:dict|None,side:str='sell') -> dict:
+        
+        if not isinstance(dic_arg,dict):
+            res.update({'x':coupon})
+            return res
+        
         res=dic_arg.copy()
         if side=='buy':
             compute_price= lambda DF,K,x,Pt_T,delta: DF*np.maximum(x-K,0)*np.sum(delta*Pt_T[:,1:],axis=1)
