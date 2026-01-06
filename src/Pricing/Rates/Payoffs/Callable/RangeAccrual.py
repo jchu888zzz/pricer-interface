@@ -21,27 +21,6 @@ def solve_coupon(dic_prep:dict,risky_curve):
                                         basis_option='polynomial',
                                         regressor_class=REGRESSOR_CLASS)
 
-class Process :
-    def compute_price(prep_model:dict,param_contract:dict):
-        dic_prep=precomputation(prep_model['calc_date'],prep_model['model'],
-                                param_contract,prep_model['risky_curve'],risky=True)
-
-        return compute_price(dic_prep,prep_model['risky_curve'])
-        
-    def solve_coupon(prep_model:dict,param_contract:dict):
-        dic_prep=precomputation(prep_model['calc_date'],prep_model['model'],
-                                param_contract,prep_model['risky_curve'],risky=True)
-        
-        def update_dic_prep(coupon,spread) ->dict:
-            dic_prep_new=dic_prep.copy()
-            dic_prep_new['contract'].coupon=coupon
-            dic_prep_new['contract'].funding_spread=spread
-            return dic_prep_new
-
-        coupon,spread=solve_coupon(dic_prep,prep_model['risky_curve'])
-        dic_prep_new=update_dic_prep(coupon,spread)
-        return compute_price(dic_prep_new,prep_model['risky_curve'])
-
 class RangeAccrual(Base.Payoff) :
 
     def __init__(self,parameters:dict[str:str]):
