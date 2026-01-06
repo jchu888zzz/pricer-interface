@@ -3,11 +3,10 @@ from PySide6.QtWidgets import (
     QHeaderView,QPushButton,QTreeWidget,QTreeWidgetItem, QSizePolicy
 )
 from PySide6.QtCore import Qt
-import json
 
 from Pricing.Utilities import Display,Dates
 
-class Ui_ResultPageRate(QWidget):
+class Ui_ResultPage(QWidget):
 
     def __init__(self,title1:str="Input",title2:str="Results"):
         super().__init__()
@@ -41,11 +40,6 @@ class Ui_ResultPageRate(QWidget):
         left_layout.addWidget(self.tree_input)
 
         self.display_left(input)
-
-        btn_copy_input=QPushButton("Copy Input")
-        btn_copy_input.setObjectName("copy_input")
-        btn_copy_input.clicked.connect(self.export_input_to_clipboard)
-        left_layout.addWidget(btn_copy_input)
 
         #Right Side - Result
         right_widget=QWidget()
@@ -81,7 +75,12 @@ class Ui_ResultPageRate(QWidget):
 
     def retrieve_data(self,input:dict,result:dict):
         self.input=input
-        self.result=self._format_data(result)
+        
+        if " Run" in input["_source_page"]:
+            self.result=self._format_data_run(result)
+        else:
+            self.result=self._format_data(result)
+        
         self.setup_ui(self.input,self.result)
 
     def display_left(self,data:dict):
@@ -90,11 +89,33 @@ class Ui_ResultPageRate(QWidget):
         self._fill_tree(self.tree_input,data)
         self.tree_input.resizeColumnToContents(0)
         self.tree_input.resizeColumnToContents(1)
+        
+    def _format_data_run(self,data:dict[str:list]) -> dict:
+        res=dict()
+        dic_table=data["table"]
+        res["table"]=dict()
+        res["table"]["Payment Dates"]=[Display.format_ql_date(x,format="%d/%m/%Y") 
+                                        for x in dic_table["Payment Dates"]]
+        if "Model Forward" in dic_table.keys():
+            if all(dic_table["Model Forward"] <=1):
+                res["table"]["Model Forward"]=[Display.format_to_percent(x) 
+                                            for x in dic_table["Model Forward"]]
+            else:
+                res["table"]["Model Forward"]=[str(Display.truncate(x,2)) 
+                                            for x in dic_table["Model Forward"]]
+        
+        for key in ["Early Redemption Proba","Zero Coupon"]:
+            if key in dic_table.keys():
+                res["table"][key]=[Display.format_to_percent(x) for x in dic_table[key]]
+
+        return res
     
     def _format_data(self,data:dict) -> dict:
         res=dict()
         if 'price' in data.keys():
             res['price']=Display.format_to_percent(data['price'])
+        if 'uf' in data.keys():
+            res['uf']=Display.format_to_percent(data['uf'])
         if 'coupon' in data.keys():
             res['coupon']=Display.format_to_percent(data['coupon'])
         
@@ -180,10 +201,7 @@ class Ui_ResultPageRate(QWidget):
                 item=QTreeWidgetItem(tree,[str(key),str(value)])
             else:
                 QTreeWidgetItem(tree,[str(key),str(value)])
-    
-    def _dict_to_txt(self,data:dict,indent:int=1)->str:
-        return json.dumps(data,indent=indent)
-    
+        
     def _result_to_excel_table(self,data:dict) -> str:
         lines=[]
 
@@ -203,76 +221,11 @@ class Ui_ResultPageRate(QWidget):
     def _copy_to_clipboard(self,text:str):
         clipboard=QApplication.clipboard()
         clipboard.setText(text)
-
-    def export_input_to_clipboard(self):
-        text=self._dict_to_txt(self.input)
-        self._copy_to_clipboard(text)
     
     def export_result_to_clipboard(self):
         text=self._result_to_excel_table(self.result)
         self._copy_to_clipboard(text)
 
-class Ui_ResultPageEquity(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.setup_ui()
-    
-    def setup_ui(self):
-        layout = QVBoxLayout(self)
-
-        layout1=QFormLayout()
-
-        self.label_duration=QLabel()
-        self.label_duration.setObjectName('label_duration')
-        layout1.addRow("Duration:",self.label_duration)
-
-        self.label_spread=QLabel()
-        self.label_spread.setObjectName('label_spread')
-        layout1.addRow("Funding spread :",self.label_spread)
-
-        layout.addLayout(layout1)
-
-        self.table = QTableWidget()
-        self.table.setObjectName("resultTable")
-        layout.addWidget(self.table)
-
-        btn_copy=QPushButton("Copy Table")
-        btn_copy.setObjectName("copyTable")
-        btn_copy.clicked.connect(self.copy_table)
-        layout.addWidget(btn_copy)
-    
-    def set_data(self, data: dict):
-        if not isinstance(data, dict):
-            raise TypeError("set_data expects a dict")
-        self.label_duration.setText(str(Display.truncate(data['duration'],2)))
-        self.label_spread.setText(str(Display.truncate(data['funding_spread']*10000,2)) +'bps')
-        
-        n=len(data['Payment Dates'])
-        self.table.setRowCount(n)
-
-        lines=[]
-
-        headers=["Payment Dates","Forwards","Proba","Zero Coupon"]
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(headers)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.table.verticalHeader().setVisible(False)
-
-        lines.append('\t'.join(headers))
-        for i in range(n):
-            date=Dates.ql_to_string(data['Payment Dates'][i],format="%d/%m/%Y")
-            self.table.setItem(i,0,QTableWidgetItem(date))
-            fwd=data['Forwards'][i]
-            self.table.setItem(i,1,QTableWidgetItem(str(Display.truncate(fwd,2))))
-            proba=data['Early Redemption Proba'][i]
-            self.table.setItem(i,2,QTableWidgetItem(str(Display.truncate(proba*100,2))+'%'))
-            ZC=data['Zero Coupon'][i]
-            self.table.setItem(i,3,QTableWidgetItem(str(Display.truncate(ZC*100,2))+'%'))
-            lines.append( '\t'.join([date,f"{fwd:.4f}",f"{proba:.4%}",f"{ZC:.4%}"]))
-
-        self.table.resizeRowsToContents()
-        self.text="\n".join(lines)
     
     def copy_table(self):
         clipboard = QApplication.clipboard()
