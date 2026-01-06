@@ -19,12 +19,12 @@ def precomputation(calc_date:ql.Date,model,data:dict[str:str]):
     calendar=model.curve.calendar
     contract.paygrid=np.array([calendar.yearFraction(calc_date,d) for d in contract.pay_dates])
     measure_change_factor=np.array([Base.compute_measure_change_factor(model,dic_arg['rates'][i],t,contract.paygrid[-1]) 
-                                        for i,t in enumerate(contract.paygrid) ])
-    
+                                        for i,t in enumerate(contract.paygrid)])[:,:,0]
+
     contract.proba_recall=contract.compute_recall_proba(stop_idxs)
     contract.res_capital=Base.compute_bond_measure_change(measure_change_factor,stop_idxs)
     contract.duration=sum(contract.compute_recall_proba(stop_idxs)*contract.paygrid)
-    contract.fwds=[np.mean(x) for x in dic_arg['undl']]
+    contract.fwds=np.mean(dic_arg['undl'],axis=1)
     
     dic_arg.update({'stop_idxs':stop_idxs})
     res={'contract':contract,
@@ -37,7 +37,6 @@ def precomputation(calc_date:ql.Date,model,data:dict[str:str]):
         funding_leg.precomputation(calc_date,model,data_rates)
         res.update({'funding_leg':funding_leg})
     return res    
-
 
 def compute_price(dic_prep:dict,risky_curve):
 
@@ -59,13 +58,12 @@ def compute_price(dic_prep:dict,risky_curve):
         funding_price=sum(funding_leg.coupons*funding_ZC)
 
         zc=risky_curve.discount_factor(contract.pay_dates,risky=False)
-        structure_price=sum(contract.res_coupon*zc)
-        
+        structure_price=sum(contract.res_coupon*zc)     
         price=structure_price-funding_price
         res['funding_table']=Base.organize_funding_table(funding_leg,funding_ZC)
     else:
         raise ValueError(f"{contract.structure_type} not recognized")
-
+    
     res["table"]=Base.organize_structure_table(contract,zc)
     res["price"]=price
     res["duration"]=contract.duration
@@ -100,7 +98,7 @@ def solve_coupon(dic_prep:dict,risky_curve):
         funding_leg.compute_values_for_early_redemption(dic_prep['dic_arg']['stop_idxs'],res_funding)
         funding_price=sum(funding_leg.coupons*funding_zc)
 
-        zc=risky_curve.Discount_Factor(contract.pay_dates,risky=False)
+        zc=risky_curve.discount_factor(contract.pay_dates,risky=False)
         def func_to_solve(x:float):
             dic_arg=contract.update_arg_pricing(x,dic_prep['dic_arg']) 
             cashflows=contract.compute_cashflows(dic_arg)
@@ -112,27 +110,6 @@ def solve_coupon(dic_prep:dict,risky_curve):
         return res_coupon,res_funding
 
     raise ValueError(f"{contract.structure_type} not recognized")
-
-class Process :
-    def compute_price(prep_model:dict,param_contract:dict):
-        dic_prep=precomputation(prep_model['calc_date'],prep_model['model'],
-                                param_contract)
-        return compute_price(dic_prep,prep_model['risky_curve'])
-        
-    def solve_coupon(prep_model:dict,param_contract:dict):
-        dic_prep=precomputation(prep_model['calc_date'],prep_model['model'],
-                         param_contract)
-        
-        def update_dic_prep(coupon,spread) ->dict:
-            dic_prep_new=dic_prep.copy()
-            dic_prep_new['contract'].coupon=coupon
-            dic_prep_new['contract'].funding_spread=spread
-            return dic_prep_new
-
-        coupon,spread=solve_coupon(dic_prep,prep_model['risky_curve'])
-        dic_prep_new=update_dic_prep(coupon,spread)
-        return compute_price(dic_prep_new,prep_model['risky_curve'])
-
 
 class Autocall(Base.Payoff):
 
@@ -161,10 +138,15 @@ class Autocall(Base.Payoff):
         undl=dic_arg['undl']
         stop_idxs=dic_arg['stop_idxs']
         cashflow_cdt=Base.compute_cdt_digit(undl,self.coupon_lvl,
-                             self.infine,self.memory)
+                            self.infine,self.memory)
         cashflow_cdt=Base.adjust_to_stop_idxs(cashflow_cdt,stop_idxs,self.infine)
 
         return coupon*cashflow_cdt
+    
+    def update_arg_pricing(self,coupon:float,dic_arg:dict) -> dict:
+        res=dic_arg.copy()
+        res.update({'x':coupon})
+        return res
     
     def update_arg_pricing(self,coupon:float,dic_arg:dict) -> dict:
         res=dic_arg.copy()
