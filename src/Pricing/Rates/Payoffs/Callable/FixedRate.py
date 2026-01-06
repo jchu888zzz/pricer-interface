@@ -47,7 +47,7 @@ def precomputation(calc_date:ql.Date,model,data:dict[str:str],risky_curve,risky:
 
     contract.paygrid=[risky_curve.calendar.yearFraction(risky_curve.calc_date,d) for d in contract.pay_dates]
     measure_change_factor=np.array([Base.compute_measure_change_factor(model,dic_arg['rates'][i],t,contract.paygrid[-1]) 
-                                for i,t in enumerate(contract.paygrid) ])
+                                for i,t in enumerate(contract.paygrid) ])[:,:,0]
     dic_arg['measure_change_factor']=measure_change_factor
 
     res.update({'contract':contract,
