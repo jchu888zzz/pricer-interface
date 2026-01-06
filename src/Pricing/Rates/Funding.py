@@ -24,16 +24,16 @@ class Leg:
         self.maturity_date=contract.issue_date+ql.Period(contract.maturity)
         if self.type_rate=='Overnight':
             self.pay_dates,self.fix_dates=Dates.compute_schedule(contract.issue_date,
-                                                                 contract.issue_date+ql.Period(contract.maturity),
-                                                                 freq=ql.Period('3M'),
-                                                                 offset=-2,
-                                                                 fixing_type='in arrears')
+                                                                contract.issue_date+ql.Period(contract.maturity),
+                                                                freq=ql.Period('3M'),
+                                                                offset=-2,
+                                                                fixing_type='in arrears')
         else:
             self.pay_dates,self.fix_dates=Dates.compute_schedule(contract.issue_date,
-                                                                 contract.issue_date+ql.Period(contract.maturity),
-                                                                 freq=ql.Period('3M'),
-                                                                 offset=-5,
-                                                                 fixing_type='in advance')
+                                                                contract.issue_date+ql.Period(contract.maturity),
+                                                                freq=ql.Period('3M'),
+                                                                offset=-5,
+                                                                fixing_type='in advance')
 
     def precomputation(self,calc_date:ql.Date,model,data_rates:dict):
         rates,schedule=data_rates['rates'],data_rates['schedule'][1:]
@@ -134,5 +134,4 @@ class Leg:
             # Vectorized amount: average of (cashflow / measure_change_factor) * alive_mask
             amounts = np.mean((cf_late / mcf_late) * mask_late, axis=0)
             self.coupons[late_idx] = amounts
-
     
