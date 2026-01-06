@@ -11,6 +11,14 @@ from  app.ui_pages.RatePage import Ui_RatePage
 from  app.ui_pages.CMTPage import Ui_CMTPage
 from  app.ui_pages.SpreadCMTPage import Ui_SpreadCMTPage
 
+PAGE_CONFIG = [
+        ("Home",Ui_HomePage),
+        ("Equity", Ui_EquityPage),
+        ("Rate", Ui_RatePage),
+        ("CMT", Ui_CMTPage),
+        ("Spread CMT", Ui_SpreadCMTPage)
+    ]
+
 class Ui_MainWindow(object):
 
     def setupUi(self, MainWindow: QMainWindow):
@@ -24,7 +32,6 @@ class Ui_MainWindow(object):
         self.horizontalLayout = QHBoxLayout(self.centralwidget)
         self.horizontalLayout.setContentsMargins(0, 0, 0, 0)
         self.horizontalLayout.setSpacing(0)
-
 
         # Sidebar (left)
         self.sidebar = QFrame(self.centralwidget)
@@ -43,84 +50,43 @@ class Ui_MainWindow(object):
         self.logo.setMinimumHeight(48)
         sidebar_layout.addWidget(self.logo)
 
-        # Navigation buttons
-        self.btnHome = QPushButton("Home", self.sidebar)
-        self.btnHome.setObjectName("btnHome")
-        self.btnHome.setCheckable(True)
-        self.btnHome.setChecked(True)
-        self.btnHome.setFlat(True)
-        self.btnHome.setIcon(QIcon.fromTheme("go-home"))
-        self.btnHome.setIconSize(QSize(18, 18))
-        sidebar_layout.addWidget(self.btnHome)
-
-
-        # self.btnSettings = QPushButton(" Settings", self.sidebar)
-        # self.btnSettings.setObjectName("btnSettings")
-        # self.btnSettings.setCheckable(True)
-        # self.btnSettings.setFlat(True)
-        # self.btnSettings.setIcon(QIcon.fromTheme("settings"))
-        # self.btnSettings.setIconSize(QSize(18, 18))
-        # sidebar_layout.addWidget(self.btnSettings)
-
-        self.btnEquity = QPushButton("Equity", self.sidebar)
-        self.btnEquity.setObjectName("btnEquity")
-
-        self.btnRate = QPushButton("Rate", self.sidebar)
-        self.btnRate.setObjectName("btnRate")
-
-        self.btnCMT = QPushButton("CMT", self.sidebar)
-        self.btnCMT.setObjectName("btnCMT")
-        
-        self.btnSpreadCMT = QPushButton("Spread CMT", self.sidebar)
-        self.btnSpreadCMT.setObjectName("btnSpreadCMT")
-
-        self._setup_button_side_bar(sidebar_layout,[self.btnEquity,self.btnRate,self.btnCMT,self.btnSpreadCMT])
-
-        # Spacer to push collapse button to bottom
-        spacer = QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding)
-        sidebar_layout.addItem(spacer)
-
-        self.horizontalLayout.addWidget(self.sidebar)
-
         # Content area (right)
         self.content = QFrame(self.centralwidget)
         self.content.setObjectName("content")
         content_layout = QVBoxLayout(self.content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
-
         # Stacked pages
         self.stack = QStackedWidget(self.content)
         self.stack.setObjectName("stack")
+        
+        self._pages={}
+        self._side_btns={}
+        for name, PageClass in PAGE_CONFIG:
+            page = PageClass()
+            #remove space in name
+            new_name="".join(name.split())
+            page.setObjectName(f"page_{new_name}")
+            self.stack.addWidget(page)
+            self._pages[name] = page
+            
+            #setup  Navigation buttonns
+            btn=QPushButton(name, self.sidebar)
+            btn.setObjectName(f"btn_{new_name}")
+            btn.setCheckable(True)
+            if name=="Home":
+                btn.setFlat(True)
+                btn.setIcon(QIcon.fromTheme("go-home"))
+                btn.setIconSize(QSize(18, 18))
+            self._side_btns[name]=btn
+            sidebar_layout.addWidget(btn)
+            
+        # Spacer to push collapse button to bottom
+        spacer = QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        sidebar_layout.addItem(spacer)
 
-        # Home page
-        self.pageHome = Ui_HomePage()
-        self.stack.addWidget(self.pageHome)
-
-        # Settings page
-        # self.pageSettings = QWidget()
-        # settings_layout = QVBoxLayout(self.pageSettings)
-        # self.settingsLabel = QLabel("Settings page content", self.pageSettings)
-        # self.settingsLabel.setAlignment(Qt.AlignCenter)
-        # settings_layout.addWidget(self.settingsLabel)
-        # self.stack.addWidget(self.pageSettings)
-
-        # Equity page
-        self.pageEquity = Ui_EquityPage()
-        self.stack.addWidget(self.pageEquity)
-
-        #Rate page
-        self.pageRate = Ui_RatePage()
-        self.stack.addWidget(self.pageRate)
-
-        #CMT page
-        self.pageCMT = Ui_CMTPage()
-        self.stack.addWidget(self.pageCMT)
-
-        #CMT page
-        self.pageSpreadCMT = Ui_SpreadCMTPage()
-        self.stack.addWidget(self.pageSpreadCMT)
-
+        self.horizontalLayout.addWidget(self.sidebar)
+        
         content_layout.addWidget(self.stack)
         self.horizontalLayout.addWidget(self.content)
 
@@ -139,11 +105,6 @@ class Ui_MainWindow(object):
         MainWindow.addAction(self.actionExit)
 
         self.retranslateUi(MainWindow)
-
-    def _setup_button_side_bar(self,layout,btns):
-        for btn in btns:
-            btn.setCheckable(True)
-            layout.addWidget(btn)
 
     def retranslateUi(self, MainWindow):
         # keep function for compatibility if generated-style usage required later
