@@ -1,14 +1,16 @@
 import os
 import QuantLib as ql
-from Pricing.Utilities import Dates,Data_File
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from copy import deepcopy
 
+from Pricing.Utilities import Dates,Data_File
 from .Payoffs.Autocallable import TARN, Autocall
 from .Payoffs.Callable import Digit, FixedRate,RangeAccrual,MinMax
 from .Model import HullWhiteCMT,HullWhite
 
 #Data Preparation
-def get_filename(path_folder:str,calc_date:ql.Date,date_format='%Y-%m-%d',prefix="mkt_data_",extension=".xlsx") -> str:
+def get_filename(path_folder:str,calc_date:ql.Date,date_format='%Y-%m-%d',prefix="market_data_",extension=".xlsx") -> str:
     date_formatted=Dates.ql_to_string(calc_date,date_format)
     return os.path.join(path_folder,prefix+date_formatted+extension)
 
@@ -35,34 +37,50 @@ def retrieve_data(path_folder:str,date:ql.Date) -> dict[pd.DataFrame]:
         "issuer":df_issuer,
         'calc_date':date}
 
+AUTOCALL_MAPPING={'Autocall':Autocall,
+                    'Tarn':TARN}
+
+CALLABLE_MAPPING={'Digit':Digit,
+                    'RangeAccrual':RangeAccrual,
+                    'FixedRate':FixedRate,
+                    'MinMax':MinMax}
 
 def compute_result_rate(mkt_data:dict,input:dict) -> tuple[dict]:
-    OPTION_MAPPING={"Price":{'Autocall':Autocall.Process.compute_price,
-                    'Tarn':TARN.Process.compute_price,
-                    'Digit':Digit.Process.compute_price,
-                    'RangeAccrual':RangeAccrual.Process.compute_price,
-                    'FixedRate':FixedRate.Process.compute_price,
-                    'MinMax':MinMax.Process.compute_price},
-
-                    "Solve coupon":{'Autocall':Autocall.Process.solve_coupon,
-                    'Digit':Digit.Process.solve_coupon,
-                    'RangeAccrual':RangeAccrual.Process.solve_coupon,
-                    'FixedRate':FixedRate.Process.solve_coupon}
-                    }
-    
-    payoff_type=input['_source_tab']
-    PAYOFF_MAPPING=OPTION_MAPPING.get(input['param']['solving_choice'])
-    func=PAYOFF_MAPPING.get(payoff_type)
-    if not func:
-        raise ValueError(f'{func} not implemented')
-
     if 'underlying1' in input['param'].keys():
         prep_model=HullWhite.get_model(mkt_data['calc_date'],mkt_data,input['param']['currency'],
-                                       input['param']['underlying1'])
+                                    input['param']['underlying1'])
     else:
         prep_model=HullWhite.get_model(mkt_data['calc_date'],mkt_data,
-                                       input['param']['currency'],None)
-    res=func(prep_model,input['param'])
+                                    input['param']['currency'],None)
+    print(prep_model)
+    if input['_source_tab'] in AUTOCALL_MAPPING.keys():
+        module=AUTOCALL_MAPPING.get(input['_source_tab'])
+        dic_prep=module.precomputation(prep_model['calc_date'],
+                                        prep_model['model'],input['param'])
+    else:
+        module=CALLABLE_MAPPING.get(input['_source_tab'])
+        dic_prep=module.precomputation(prep_model['calc_date'],
+                                        prep_model['model'],input['param'],
+                                        prep_model['risky_curve'],risky=True)
+    
+    solving_choice=input['param']['solving_choice']
+    if solving_choice=="Price":
+        res=module.compute_price(dic_prep,prep_model['risky_curve'])
+    elif solving_choice=="Solve coupon":
+        coupon,spread=module.solve_coupon(dic_prep,prep_model['risky_curve'])
+        print(coupon,spread)
+        # new_dic_prep['contract'].structure_type="Bond"
+        # bond_res=module.compute_price(new_dic_prep,prep_model['risky_curve'])
+        
+        # res={"uf":swap_res["price"],
+        #     "duration":bond_res["duration"],
+        #     "funding_spread":spread,
+        #     "coupon":coupon,
+        #     "table":bond_res["table"]}
+        
+    else :
+        raise ValueError(f"{solving_choice} ,not recognized for this {module}")
+    
     return input,res
 
 def compute_result_cmt(mkt_data:dict,input:dict) ->tuple[dict]:
@@ -73,7 +91,6 @@ def compute_result_cmt(mkt_data:dict,input:dict) ->tuple[dict]:
                     'RangeAccrual':RangeAccrual.Process.compute_price,
                     'MinMax':MinMax.Process.compute_price},
                     
-
                     "Solve coupon":{'Autocall':Autocall.Process.solve_coupon,
                     'Digit':Digit.Process.solve_coupon,
                     'RangeAccrual':RangeAccrual.Process.solve_coupon}
@@ -85,8 +102,56 @@ def compute_result_cmt(mkt_data:dict,input:dict) ->tuple[dict]:
     if not func:
         raise ValueError(f'{func} not implemented')
 
-    prep_model=HullWhiteCMT.get_model(mkt_data,input['param']['underlying1'],
-                                    mkt_data['calc_date'])
+    prep_model=HullWhiteCMT.get_model(mkt_data['calc_date'],mkt_data,
+                                    input['param']['currency'],
+                                    input['param']['underlying1'])
+
     res=func(prep_model,input['param'])
     
     return input,res
+
+
+def compute_result_run(mkt_data:dict,input:dict,max_workers=4)->tuple[dict]:
+    MODULE_MAPPING={'FixedRate':FixedRate}
+    
+    payoff_type=input['_source_tab']
+    module=MODULE_MAPPING.get(payoff_type)
+    if not module:
+        raise ValueError(f'{module} not implemented')
+    
+    prep_model=HullWhite.get_model(mkt_data['calc_date'],mkt_data,
+                                    input['base_param']['currency'],None)
+    
+    results = {}
+    base_params=input['base_param']
+    maturity_min=input['param']['min_maturity']
+    maturity_max=input['param']['max_maturity']
+    NC_min=input['param']['min_NC']
+    def price_single(maturity:int,NC:int) -> tuple[str,tuple[float,float]]:
+        params = deepcopy(base_params)
+        params['maturity'] = str(maturity)
+        params['NC']=str(NC)
+        dic_prep=module.precomputation(prep_model['calc_date'],prep_model['model'],
+                                        params,prep_model['risky_curve'],risky=True)
+        
+        return f"{maturity}NC{NC}", module.solve_coupon(dic_prep,prep_model['risky_curve'])
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures={}
+        for mat in range(maturity_min,maturity_max+1):
+            for nc in range(NC_min,mat):
+                futures[executor.submit(price_single, mat,nc)]=f"{mat}NC{nc}"
+        for future in as_completed(futures):
+            try:
+                description, result = future.result()
+                results[description] = result
+            except Exception as e:
+                description = futures[future]
+                results[description] = {'error': str(e)}
+
+    sorted_keys=sorted(results.keys())
+    res={"Name":sorted_keys,
+        "Coupon":[results[key][0] for key in sorted_keys],
+        "Funding":[results[key][1] for key in sorted_keys]}
+    
+    return res #pd.DataFrame(results).T.sort_index()
