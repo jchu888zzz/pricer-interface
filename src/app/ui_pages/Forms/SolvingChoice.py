@@ -1,8 +1,10 @@
 from PySide6.QtWidgets import (QFormLayout,QPushButton,QSizePolicy,
-                            QStackedWidget,QWidget,QHBoxLayout,QSpacerItem)
+                            QStackedWidget,QWidget,QVBoxLayout,QSpacerItem)
 
 
-from app.widgets.CustomWidgets import (SolvingComboBox,StructureType,UF,Buffer,Coupon
+from app.widgets.CustomWidgets import (SolvingComboBox,StructureType,
+                                        UF,Buffer,Coupon,SubmitButton,
+                                        CopyInputButton
                                 )
 
 class Ui_SolvingForm(QFormLayout):
@@ -43,12 +45,15 @@ class Ui_SolvingForm(QFormLayout):
         self.addRow(self.stack)
 
         # Action buttons
-        btn_layout = QHBoxLayout()
-        self.submit_btn = QPushButton("Submit")
-        self.submit_btn.setObjectName("submit_btn")
-        self.submit_btn.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        btn_layout = QVBoxLayout()
+        
+        self.input_btn=CopyInputButton("Copy Input")
+        self.submit_btn = SubmitButton("Submit")
+        btn_layout.addWidget(self.input_btn)
         btn_layout.addWidget(self.submit_btn)
         self.addRow(btn_layout)
+        
+        self.stack.setCurrentWidget(self.page_coupon)
         
     def _display(self,char:str):
         if char=='Solve coupon':
@@ -83,34 +88,14 @@ class Ui_PricingForm(QFormLayout):
         # self.structure_type=StructureType()
         # self.addRow("Structure :", self.structure_type)
 
-        btn_layout = QHBoxLayout()
-        self.submit_btn = QPushButton("Price")
-        self.submit_btn.setObjectName("submit_btn")
-        self.submit_btn.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        btn_layout = QVBoxLayout()
+        self.input_btn=CopyInputButton("Copy Input")
+        self.submit_btn = SubmitButton("Find Funding")
+        btn_layout.addWidget(self.input_btn)
         btn_layout.addWidget(self.submit_btn)
         self.addRow(btn_layout)
     
     def _retrieve_input(self) ->dict[str:str]:
         return {"solving_choice":"Price",
-              "structure_type":"Bond"}
-
-class Ui_SolvingFormEquity(QFormLayout):
-    def __init__(self):
-        super().__init__()
-        self.setup_ui()
-
-    def setup_ui(self):
-
-        self.setContentsMargins(20, 12, 20, 12)
-        self.setSpacing(10)
-
-        self.structure_type=StructureType()
-        self.addRow("Structure :", self.structure_type)
-        # Action buttons
-        btn_layout = QHBoxLayout()
-        self.submit_btn = QPushButton("Find Funding")
-        self.submit_btn.setObjectName("submit_btn")
-        self.submit_btn.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-        btn_layout.addWidget(self.submit_btn)
-        self.addRow(btn_layout)
+                "structure_type":"Bond"}
         
