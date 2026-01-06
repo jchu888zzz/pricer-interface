@@ -1,9 +1,27 @@
 from PySide6.QtWidgets import (
     QWidget, QFormLayout,QComboBox,QStackedWidget,
     QDoubleSpinBox,QAbstractSpinBox,QDateEdit,QSpinBox,QHBoxLayout,
-    QCheckBox,QPushButton,QSizePolicy,QLabel)
-
+    QCheckBox,QPushButton,QSizePolicy,QLabel,QApplication)
 from PySide6.QtCore import QDate
+
+
+class SubmitButton(QPushButton):
+    def __init__(self,txt:str):
+        super().__init__(txt)
+        self.setup_ui()
+
+    def setup_ui(self):
+        self.setObjectName("submit_btn")
+        self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        
+class CopyInputButton(QPushButton):
+    def __init__(self,txt:str):
+        super().__init__(txt)
+        self.setup_ui()
+
+    def setup_ui(self):
+        self.setObjectName("copy_input")
+        self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
 
 class IssueDate(QDateEdit):
     def __init__(self):
@@ -46,29 +64,34 @@ class Currency(QComboBox):
         self.addItems(list(dic_currency.keys()))
 
 
-class Underlying(QComboBox):
+class SingleUnderlying(QComboBox):
 
-    def __init__(self,dic_currency:dict[str:list]):
+    def __init__(self,dic_currency:dict[str:dict]):
         super().__init__()
         self.setup_ui(dic_currency)
     
     def setup_ui(self,dic_currency):
         self.setObjectName("undl")
         self.dic_currency=dic_currency
-        self.addItems(list(self.dic_currency.values())[0])
+        key=list(dic_currency.keys())[0]
+        undl_list=dic_currency[key]
+        self.addItems(undl_list)
     
     def _display(self,cur:str):
         self.clear()
         self.addItems(self.dic_currency[cur])
+        
+    def _retrieve_input(self):
+        return {"underlying1": self.currentText()}
 
 class SpreadUnderlying(QWidget):
 
-    def __init__(self,dic_cur:dict[str:list]):
+    def __init__(self,dic_currency:dict[str:dict]):
         super().__init__()
-        self.dic_cur=dic_cur
-        self.setup_ui()
+        self.dic_currency=dic_currency
+        self.setup_ui(dic_currency)
     
-    def setup_ui(self):
+    def setup_ui(self,dic_currency):
         self.setObjectName("undl_spread")
         layout=QHBoxLayout()
         self.combo1=QComboBox()
@@ -76,9 +99,9 @@ class SpreadUnderlying(QWidget):
         self.label=QLabel("-")
         self.combo2=QComboBox()
         self.combo2.setObjectName("undl")
-        cur=list(self.dic_cur.keys())[0]
-        self.combo1.addItems(self.dic_cur[cur][0])
-        self.combo2.addItems(self.dic_cur[cur][1])
+        key=list(dic_currency.keys())[0]
+        self.combo1.addItems(dic_currency[key]['undl1'])
+        self.combo2.addItems(dic_currency[key]['undl2'])
         layout.addWidget(self.combo1)
         layout.addWidget(self.label)
         layout.addWidget(self.combo2)
@@ -87,14 +110,13 @@ class SpreadUnderlying(QWidget):
     def _display(self,cur:str):
         self.combo1.clear()
         self.combo2.clear()
-        self.combo1.addItems(self.dic_cur[cur][0])
-        self.combo2.addItems(self.dic_cur[cur][1])
+        self.combo1.addItems(self.dic_currency[cur]['undl1'])
+        self.combo2.addItems(self.dic_currency[cur]['undl2'])
     
     def _retrieve_input(self):
         return {"underlying1":self.combo1.currentText(),
                 "underlying2":self.combo2.currentText()}
-
-
+        
 class FixingOffset(QSpinBox):
     def __init__(self):
         super().__init__()
@@ -180,68 +202,6 @@ class IsCallable(QCheckBox):
         self.setObjectName("is_callable")
 
 
-# class CallableWidget(QWidget):
-#     def __init__(self):
-#         super().__init__()
-#         self.setup_ui()
-
-#     def setup_ui(self):
-#         layout=QFormLayout(self)
-#         layout.setContentsMargins(0,0,0,0)
-
-#         self.is_callable= IsCallable()
-#         layout.addRow("Is Callable :", self.is_callable)
-        
-#         self.stack=QStackedWidget()
-
-#         page_non_call=QWidget()
-#         self.stack.addWidget(page_non_call)
-
-#         page_call=QWidget()
-#         page_call_layout=QFormLayout(page_call)
-#         page_call_layout.setContentsMargins(0,0,0,0)
-
-#         self.diff_calendar= DiffCallCalendar()
-#         page_call_layout.addRow("Different Call Calendar :", self.diff_calendar)
-
-#         self.param_stack=QStackedWidget()
-#         page_same=QWidget()
-#         page_same_layout=QFormLayout(page_same)
-#         page_same_layout.setContentsMargins(0,0,0,0)
-        
-#         self.NC = NC()
-#         page_same_layout.addRow("NC :", self.NC)
-        
-#         self.multicall=MultiCall()
-#         page_same_layout.addRow("Multi call :", self.multicall)        
-#         self.param_stack.addWidget(page_same)
-
-#         page_custom=QWidget()
-#         page_custom_layout=QFormLayout(page_custom)
-#         page_custom_layout.setContentsMargins(0,0,0,0)
-#         self.first_call_date = FistCallDate()
-#         page_custom_layout.addRow("First Call Date :",self.first_call_date)
-
-#         self.call_frequency = CallFrequency()
-#         page_custom_layout.addRow("Call Frequency :", self.call_frequency)
-#         self.param_stack.addWidget(page_custom)
-
-#         page_call_layout.addRow(self.param_stack)
-#         self.stack.addWidget(page_call)
-
-#         layout.addRow("",self.stack)
-    
-#     def _retrieve_input(self) -> dict:
-        
-#         if not self.is_callable.isChecked():
-#             return {}
-#         if self.diff_calendar.isChecked():
-#             return {'first_call_date':self.first_call_date.date().toString("dd.MM.yyyy"),
-#                         'call_frequency':self.call_frequency.currentText()}
-#         else:
-#             return {"NC":str(self.NC.value()),
-#                     "multi-call":"true" if self.multicall.isChecked() else "false"}
-
 class CallableWidget(QWidget):
     def __init__(self):
         super().__init__()
@@ -262,13 +222,33 @@ class CallableWidget(QWidget):
         page_call=QWidget()
         page_call_layout=QFormLayout(page_call)
         page_call_layout.setContentsMargins(0,0,0,0)
+
+        self.diff_calendar= DiffCallCalendar()
+        page_call_layout.addRow("Different Call Calendar :", self.diff_calendar)
+
+        self.param_stack=QStackedWidget()
+        page_same=QWidget()
+        page_same_layout=QFormLayout(page_same)
+        page_same_layout.setContentsMargins(0,0,0,0)
         
         self.NC = NC()
-        page_call_layout.addRow("NC :", self.NC)
+        page_same_layout.addRow("NC :", self.NC)
         
         self.multicall=MultiCall()
-        page_call_layout.addRow("Multi call :", self.multicall)        
+        page_same_layout.addRow("Multi call :", self.multicall)        
+        self.param_stack.addWidget(page_same)
 
+        page_custom=QWidget()
+        page_custom_layout=QFormLayout(page_custom)
+        page_custom_layout.setContentsMargins(0,0,0,0)
+        self.first_call_date = FistCallDate()
+        page_custom_layout.addRow("First Call Date :",self.first_call_date)
+
+        self.call_frequency = CallFrequency()
+        page_custom_layout.addRow("Call Frequency :", self.call_frequency)
+        self.param_stack.addWidget(page_custom)
+
+        page_call_layout.addRow(self.param_stack)
         self.stack.addWidget(page_call)
 
         layout.addRow("",self.stack)
@@ -277,9 +257,51 @@ class CallableWidget(QWidget):
         
         if not self.is_callable.isChecked():
             return {}
+        if self.diff_calendar.isChecked():
+            return {'first_call_date':self.first_call_date.date().toString("dd.MM.yyyy"),
+                    'call_frequency':self.call_frequency.currentText()}
+        else:
+            return {"NC":str(self.NC.value()),
+                    "multi-call":"true" if self.multicall.isChecked() else "false"}
 
-        return {"NC":str(self.NC.value()),
-                "multi-call":"true" if self.multicall.isChecked() else "false"}
+# class CallableWidget(QWidget):
+#     def __init__(self):
+#         super().__init__()
+#         self.setup_ui()
+
+#     def setup_ui(self):
+#         layout=QFormLayout(self)
+#         layout.setContentsMargins(0,0,0,0)
+
+#         self.is_callable= IsCallable()
+#         layout.addRow("Is Callable :", self.is_callable)
+        
+#         self.stack=QStackedWidget()
+
+#         page_non_call=QWidget()
+#         self.stack.addWidget(page_non_call)
+
+#         page_call=QWidget()
+#         page_call_layout=QFormLayout(page_call)
+#         page_call_layout.setContentsMargins(0,0,0,0)
+        
+#         self.NC = NC()
+#         page_call_layout.addRow("NC :", self.NC)
+        
+#         self.multicall=MultiCall()
+#         page_call_layout.addRow("Multi call :", self.multicall)        
+
+#         self.stack.addWidget(page_call)
+
+#         layout.addRow("",self.stack)
+    
+#     def _retrieve_input(self) -> dict:
+        
+#         if not self.is_callable.isChecked():
+#             return {}
+
+#         return {"NC":str(self.NC.value()),
+#                 "multi-call":"true" if self.multicall.isChecked() else "false"}
 
 
 class HasGuaranteedCoupon(QCheckBox):
@@ -460,8 +482,8 @@ class SolvingComboBox(QComboBox):
         self.setup_ui()
 
     def setup_ui(self):
-        self.setObjectName("call_frequency")
-        self.addItems(['Solve coupon','Price'])
+        self.setObjectName("solving_cb")
+        self.addItems(['Price','Solve coupon'])
 
 class UF(QDoubleSpinBox):
     def __init__(self):
@@ -497,5 +519,6 @@ class Coupon(QDoubleSpinBox):
         self.setObjectName("coupon")
         self.setRange(0.0,20.0)
         self.setDecimals(2)
+        self.setValue(4.0)
         self.setSuffix("%")
         self.setButtonSymbols(QAbstractSpinBox.NoButtons)
