@@ -9,7 +9,7 @@ def precomputation(calc_date:ql.Date,model,data:dict[str:str]):
 
     contract=TARN(data)
     data_rates=model.generate_rates(calc_date,contract.pay_dates[-1],
-                       cal=ql.Thirty360(ql.Thirty360.BondBasis),Nbsimu=10000,seed=0)
+                        cal=ql.Thirty360(ql.Thirty360.BondBasis),Nbsimu=10000,seed=0)
     
     contract._update(calc_date,cal=ql.Thirty360(ql.Thirty360.BondBasis))
     contract.compute_funding_adjustment(calc_date)
@@ -18,13 +18,13 @@ def precomputation(calc_date:ql.Date,model,data:dict[str:str]):
     curve=model.curve
     contract.paygrid=np.array([curve.calendar.yearFraction(calc_date,d) for d in contract.pay_dates ])
     measure_change_factor=np.array([Base.compute_measure_change_factor(model,dic_arg['rates'][i],t,contract.paygrid[-1]) 
-                                        for i,t in enumerate(contract.paygrid) ])
+                                        for i,t in enumerate(contract.paygrid) ])[:,:,0]
     
-    contract.fwds=[np.mean(x) for x in dic_arg['undl']]
+    contract.fwds=np.mean(dic_arg['undl'],axis=1)
     
     res={'contract':contract,
-         'measure_change_factor':measure_change_factor,
-         'dic_arg':dic_arg}
+        'measure_change_factor':measure_change_factor,
+        'dic_arg':dic_arg}
 
     if contract.structure_type!='Swap':
         return res
@@ -47,7 +47,7 @@ def compute_price(dic_prep:dict,risky_curve):
 
     if contract.structure_type=="Bond":
         contract.res_capital=Base.compute_bond_measure_change(dic_prep['measure_change_factor'],
-                                                              stop_idxs)
+                                                            stop_idxs)
         zc=risky_curve.discount_factor(contract.pay_dates,risky=True)
         price=sum((contract.res_coupon+contract.res_capital)*zc)
     
@@ -76,13 +76,6 @@ def compute_price(dic_prep:dict,risky_curve):
                                                                 contract.funding_adjustment)
     return res
 
-class Process :
-    def compute_price(prep_model:dict,param_contract:dict):
-        dic_prep=precomputation(prep_model['calc_date'],prep_model['model'],
-                                param_contract)
-
-        return compute_price(dic_prep,prep_model['risky_curve'])
-
 class TARN(Base.Payoff):
 
     def __init__(self,parameters:dict):
@@ -101,12 +94,11 @@ class TARN(Base.Payoff):
         
         guaranteed_cashflows=np.zeros_like(undl.T)
         if hasattr(self,"guar_coupon"):
-            guaranteed_cashflows[:,:self.NC+1]=self.guar_coupon
+            guaranteed_cashflows[:,:self.NC]=self.guar_coupon
         
         cdt_cashflows=Base.compute_cdt_digit(undl,self.coupon_lvl,
-                             self.infine,self.memory)*coupon
+                            self.infine,self.memory)*coupon
         cdt_cashflows[:,:self.NC]=False
-        
         cashflows=guaranteed_cashflows+cdt_cashflows
 
         autocall_cdt=(np.cumsum(cashflows,axis=1) >=self.target )
