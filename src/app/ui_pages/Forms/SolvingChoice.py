@@ -94,5 +94,5 @@ class Ui_PricingForm(QFormLayout):
         self.addRow(btn_layout)
     
     def _retrieve_input(self) ->dict[str:str]:
-        return {"solving_choice":"Price"}
-        
+        return {"solving_choice":"Price",
+                "structure_type":"Bond"}

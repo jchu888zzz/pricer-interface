@@ -4,7 +4,6 @@ import pandas as pd
 
 from .Forms.Equity import Ui_Autocall
 
-#path_markit_names=r"\\Umilp-p2.cdm.cm-cic.fr\cic-lai-lae-cigogne$\1_Structuration\19_Quant\pricer-interface-main2\Markit_names.xlsx"
 path_markit_names=r"C:\Users\jorda\OneDrive\Documents\pricer-interface-main2\Markit_names.xlsx"
 df=pd.read_excel(path_markit_names)
 dic_currency=dict(tuple(df.groupby('Currency')['Underlyings']))
@@ -56,4 +55,8 @@ class Ui_EquityPage(QWidget):
             
     def _on_submitted(self, input_data: dict, source_tab: str):
         param=self._retrieve_param(input_data,source_tab)
+<<<<<<< HEAD
         self.submitted.emit(param)
+=======
+        self.submitted.emit(param)
+>>>>>>> 787c160fd62c1eab198f09ec6622310a8e91f52d
