@@ -5,7 +5,7 @@ from bisect import bisect
 import typing
 from scipy.optimize import minimize
 
-from Pricing.Utilities import Dates,InputConverter,Functions
+from Pricing.Utilities import Dates,InputConverter
 
 #Coupon Functions
 def get_stop_matrix(stop_idxs:list[int],shape:tuple[int,int])-> np.ndarray:
@@ -24,7 +24,6 @@ def memory_feature(b:list)->np.ndarray:
     for item in temp:
         res[item-1]=item-tracker
         tracker=item
-        
     return res
 
 def to_zero(v:list,idx:int) -> list:
@@ -53,40 +52,49 @@ def compute_cdt_digit(simu:np.ndarray,coupon_lvl:float,infine:bool,memory_effect
 
 #Contract Functions + Payoff Class
 def compute_measure_change_factor(model,rates:np.ndarray,t:float,T:float) -> np.ndarray:
+    "Measure change factor between to pass from measure T forward to t-forward"
     Pt_T=model.compute_discount_factor_from_rates(rates,t,T)
-    return (1/Pt_T)*model.DF(T)/model.DF(t)
+    return Pt_T*model.DF(t)/model.DF(T)
 
 def compute_bond_measure_change(measure_change_factor:np.ndarray,stop_idxs:np.ndarray)-> np.ndarray:
     Stop_matrix=get_stop_matrix(stop_idxs,measure_change_factor.T.shape)
-    res=np.array([ np.mean([b/y for y,b in zip(measure_change_factor[i],Stop_matrix[:,i])]) 
+    res=np.array([ np.mean([mcf*b for mcf,b in zip(measure_change_factor[i],Stop_matrix[:,i])]) 
                     for i in range(len(measure_change_factor))])
+    
     return res
 
 def prep_undl(contract,model,data_rates:dict,include_rates=True) -> dict:
-    if contract.hasunderlying:
-        # Determine if we need depth (range accrual case)
-        nb_sub_fix_points = getattr(contract, 'fixing_depth', None)
-        fix_dates = np.insert(contract.fix_dates, 0, contract.issue_date) if nb_sub_fix_points else contract.fix_dates
+    """ To use when contract has underlying"""
+    # Determine if we need depth (range accrual case)
+    nb_sub_fix_points = getattr(contract, 'fixing_depth', None)
+    fix_dates = np.insert(contract.fix_dates, 0, contract.issue_date) if nb_sub_fix_points else contract.fix_dates
 
-        # Call the appropriate unified method
-        if contract.spreadunderlying:
-            dic_arg = model.compute_spread_undl_from_rates(data_rates, fix_dates,
-                                                           contract.underlying_name1, contract.underlying_name2,
-                                                           nb_sub_fix_points=nb_sub_fix_points,
-                                                           include_rates=include_rates)
-        else:
-            dic_arg = model.compute_single_undl_from_rates(data_rates, fix_dates,
-                                                           contract.underlying_name1,
-                                                           nb_sub_fix_points=nb_sub_fix_points,
-                                                           include_rates=include_rates)
+    # Call the appropriate unified method
+    if contract.spreadunderlying:
+        res = model.compute_spread_undl_from_rates(data_rates, fix_dates,
+                                                        contract.underlying_name1, contract.underlying_name2,
+                                                        nb_sub_fix_points=nb_sub_fix_points,
+                                                        include_rates=include_rates)
+    else:
+        res = model.compute_single_undl_from_rates(data_rates, fix_dates,
+                                                        contract.underlying_name1,
+                                                        nb_sub_fix_points=nb_sub_fix_points,
+                                                        include_rates=include_rates)
 
-        # Post-process for range accrual (depth case)
-        if nb_sub_fix_points:
-            densities = contract.compute_densities(dic_arg['undl'])
-            dic_arg.update({'undl': dic_arg['undl'][:, -1, :], 'densities': densities})
+    # Post-process for range accrual (depth case)
+    if nb_sub_fix_points:
+        densities = contract.compute_densities(res['undl'])
+        res.update({'undl': res['undl'][:, -1, :], 'densities': densities})
 
-        return dic_arg
-            
+    return res
+
+def prep_contract_common(calc_date, contract, risky_curve) ->dict:
+    """prepare common attribute , contract is mutable"""
+    contract._update(calc_date, cal=ql.Thirty360(ql.Thirty360.BondBasis))
+    contract.compute_funding_adjustment(calc_date)
+    contract.paygrid=np.array([risky_curve.calendar.yearFraction(calc_date,d) for d in contract.pay_dates ])
+    return 
+
 class Payoff :
 
     def get_common_parameters(self,parameters:dict):
@@ -115,7 +123,6 @@ class Payoff :
                 self.infine=True
         
         self.offset=int(InputConverter.set_param(parameters['fixing_days_offset'],0))
-        self.structure_type=InputConverter.check_option_type(parameters['structure_type'])
         self.get_undl_info(parameters)
         self.pay_dates,self.fix_dates=Dates.compute_schedule(self.issue_date,self.issue_date+ql.Period(self.maturity),
                                                             self.freq,self.offset,self.fixing_type)
@@ -125,7 +132,6 @@ class Payoff :
             first_call_date=InputConverter.convert_date(parameters['first_call_date'])
             frequency=InputConverter.freq_converter(parameters['call_frequency'])
             self.call_dates=Dates.compute_target_schedule(first_call_date,self.pay_dates[-1],frequency)[:-1]
-            #self.call_idxs=[Functions.find_idx(self.fix_dates,x) for x in self.call_dates ]
             self.is_callable=True  
             return
         if 'NC' in parameters.keys():
@@ -135,7 +141,6 @@ class Payoff :
             if 'multi-call' in parameters.keys():
                 if parameters['multi-call']=='true':
                     self.call_dates+=list(self.fix_dates[non_call+1:-1])
-            #self.call_idxs=[Functions.find_idx(self.fix_dates,x) for x in self.call_dates ]
             return
         
     def get_guaranteed_coupon_info(self,parameters:dict):
@@ -202,26 +207,56 @@ class Payoff :
             res[key]=value/len(stop_idxs)
         return res
 
-#Result and spread functions
-def organize_structure_table(contract,ZC) -> dict:
+def _validate_and_set_dic_arg(contract,dic_arg: dict = None) -> dict:
+    """Validate dic_arg is a dict or None, and set default if None."""
+    if dic_arg is not None and not isinstance(dic_arg, dict):
+        raise TypeError(f"dic_arg must be a dict or None, got {type(dic_arg).__name__}")
+    if dic_arg is None:
+        dic_arg = contract._set_dic_arg()
+    return dic_arg
 
+def compute_simulated_cashflows(contract,dic_arg:dict,option:str):
+    """  option must be 'classic' or 'helper' , Handles payoff that can be bullet and callable """
+    dic_cashflows = contract._compute_cashflows(dic_arg) 
+    cashflows=dic_cashflows[option]
+    return cashflows
+
+#Result and spread functions
+def organize_contract_result(contract) -> dict:
+    """Organize contract results into a dictionary for display (bullet structures)."""
+    res=dict()
+    res["duration"]=sum(contract.proba_recall*contract.paygrid)
+    res["funding_spread"]=contract.funding_spread
+
+    res["table"]={'Payment Dates':contract.pay_dates}
+    if hasattr(contract,'fwds'):
+        res["table"].update({'Model Forward':contract.fwds})
+    res["table"].update({
+            'Early Redemption Proba':contract.proba_recall,
+            'Cash Flows':contract.res_coupon,
+            'Zero Coupon':contract.zc})
+    return res
+
+def organize_structure_table(contract, zc) -> dict:
+    """Organize structure table for callable/autocallable products."""
     res={'Payment Dates':contract.pay_dates}
     if hasattr(contract,'fwds'):
         res.update({'Model Forward':contract.fwds})
     res.update({
             'Early Redemption Proba':contract.proba_recall,
             'Cash Flows':contract.res_coupon,
-            'Zero Coupon':ZC})
-    
+            'Zero Coupon':zc})
+    if hasattr(contract,'res_capital'):
+        res.update({'Capital':contract.res_capital})
     return res
 
-def organize_funding_table(funding_leg,ZC:np.ndarray)-> dict:
+def organize_funding_table(funding_leg)-> dict:
+    """Organize funding leg table for display."""
     res={'Payment Dates':funding_leg.pay_dates,
         'Model Forward':np.mean(funding_leg.fwds,axis=0),
         'Proba':funding_leg.proba,
         'Cash Flows': funding_leg.coupons,
-        'Zero Coupon':ZC}
-
+        'Zero Coupon':funding_leg.zc}
     return res
 
 def get_funding_spread_early_redemption(risky_curve,pay_dates:list[ql.Date],proba:np.ndarray,adjustment:float) ->np.ndarray:
@@ -242,4 +277,3 @@ def optimize_coupon(func_to_solve:typing.Callable):
     bounds=[(0.01,.5)]
     opt=minimize(func_to_solve,x0=init,method='Nelder-Mead',bounds=bounds)
     return opt.x[0]
-

@@ -214,7 +214,7 @@ class HW :
         lvl=np.sum(P_fix[:,1:]*delta,axis=1)
         
         res=(P_fix[:,0]-P_fix[:,-1])/lvl
-        # float_tgrid=t+np.arange(0,tenor,delta_float)
+        # float_tgrid=t+np.arange(0,t_tenor,delta_float)
         # P_float=self.compute_discount_factor_from_rates(rates,t,float_tgrid)
         # res=(P_float[:,0]-P_float[:,-1])/lvl
         res+=self.cvx_adj_helper.compute_adjustment(t,tenor)
@@ -329,6 +329,4 @@ class HW :
         else:
             dic_arg.update({"rates":rates})
             return dic_arg
-        else:
-            dic_arg.update({"rates":rates})
-            return dic_arg
+

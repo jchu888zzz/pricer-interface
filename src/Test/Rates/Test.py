@@ -1,5 +1,7 @@
 import sys
 from pathlib import Path
+
+from Pricing.Rates.Payoffs import Autocall, Digit, FixedRate, MinMax
 pricing_root=Path(__file__).parent.parent.parent
 sys.path.insert(0,str(pricing_root))
 
@@ -12,8 +14,8 @@ from Pricing.Utilities import Display,Functions
 from Pricing.Curves import Classic
 from Pricing.Rates.Model import  HullWhite
 from Pricing.Rates import Instruments
-from Pricing.Rates.Payoffs.Autocallable import TARN, Autocall
-from Pricing.Rates.Payoffs.Callable import Digit, FixedRate,RangeAccrual,MinMax
+from Pricing.Rates.Payoffs import TARN
+from Pricing.Rates.Payoffs import RangeAccrual
 
 DataPath =r"C:\Users\jorda\OneDrive\Documents\pricer_interface-main\snapshot"
 calc_date=ql.Date(11,11,2025)

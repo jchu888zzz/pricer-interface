@@ -4,9 +4,8 @@ import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 
+from .Payoffs.Types import Autocall, Digit, FixedRate, MinMax,Tarn,RangeAccrual
 from Pricing.Utilities import Dates,Data_File
-from .Payoffs.Autocallable import TARN, Autocall
-from .Payoffs.Callable import Digit, FixedRate,RangeAccrual,MinMax
 from .Model import HullWhiteCMT,HullWhite
 
 #Data Preparation
@@ -38,7 +37,7 @@ def retrieve_data(path_folder:str,date:ql.Date) -> dict[pd.DataFrame]:
         'calc_date':date}
 
 AUTOCALL_MAPPING={'Autocall':Autocall,
-                    'Tarn':TARN}
+                    'Tarn':Tarn}
 
 CALLABLE_MAPPING={'Digit':Digit,
                     'RangeAccrual':RangeAccrual,
@@ -86,7 +85,7 @@ def compute_result_rate(mkt_data:dict,input:dict) -> tuple[dict]:
 def compute_result_cmt(mkt_data:dict,input:dict) ->tuple[dict]:
         
     OPTION_MAPPING={"Price":{'Autocall':Autocall.Process.compute_price,
-                    'Tarn':TARN.Process.compute_price,
+                    'Tarn':Tarn.Process.compute_price,
                     'Digit':Digit.Process.compute_price,
                     'RangeAccrual':RangeAccrual.Process.compute_price,
                     'MinMax':MinMax.Process.compute_price},
@@ -112,46 +111,63 @@ def compute_result_cmt(mkt_data:dict,input:dict) ->tuple[dict]:
 
 
 def compute_result_run(mkt_data:dict,input:dict,max_workers=4)->tuple[dict]:
+    """
+    Compute pricing results for multiple parameter combinations using thread pool.
+    Properly manages thread lifecycle to avoid hanging threads on application close.
+    """
     MODULE_MAPPING={'FixedRate':FixedRate}
-    
+
     payoff_type=input['_source_tab']
     module=MODULE_MAPPING.get(payoff_type)
     if not module:
         raise ValueError(f'{module} not implemented')
-    
+
     prep_model=HullWhite.get_model(mkt_data['calc_date'],mkt_data,
                                     input['base_param']['currency'],None)
-    
+
     results = {}
     base_params=input['base_param']
     maturity_min=input['param']['min_maturity']
     maturity_max=input['param']['max_maturity']
     NC_min=input['param']['min_NC']
+
     def price_single(maturity:int,NC:int) -> tuple[str,tuple[float,float]]:
+        """Price a single contract configuration."""
         params = deepcopy(base_params)
         params['maturity'] = str(maturity)
         params['NC']=str(NC)
         dic_prep=module.precomputation(prep_model['calc_date'],prep_model['model'],
                                         params,prep_model['risky_curve'],risky=True)
-        
+
         return f"{maturity}NC{NC}", module.solve_coupon(dic_prep,prep_model['risky_curve'])
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures={}
-        for mat in range(maturity_min,maturity_max+1):
-            for nc in range(NC_min,mat):
-                futures[executor.submit(price_single, mat,nc)]=f"{mat}NC{nc}"
-        for future in as_completed(futures):
+    # Explicit executor with proper cleanup - avoids hanging threads on app close
+    executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="pricing")
+    try:
+        futures = {}
+        for mat in range(maturity_min, maturity_max+1):
+            for nc in range(NC_min, mat):
+                future = executor.submit(price_single, mat, nc)
+                futures[future] = f"{mat}NC{nc}"
+
+        # Collect results with timeout protection
+        for future in as_completed(futures, timeout=300):  # 5 minute timeout
             try:
-                description, result = future.result()
+                description, result = future.result(timeout=10)
                 results[description] = result
             except Exception as e:
                 description = futures[future]
                 results[description] = {'error': str(e)}
 
-    sorted_keys=sorted(results.keys())
-    res={"Name":sorted_keys,
-        "Coupon":[results[key][0] for key in sorted_keys],
-        "Funding":[results[key][1] for key in sorted_keys]}
-    
-    return res #pd.DataFrame(results).T.sort_index()
+    finally:
+        # Critical: ensure threads are cleaned up before returning
+        executor.shutdown(wait=True, timeout=10)
+
+    sorted_keys = sorted(results.keys())
+    res = {
+        "Name": sorted_keys,
+        "Coupon": [results[key][0] if 'error' not in results[key] else None for key in sorted_keys],
+        "Funding": [results[key][1] if 'error' not in results[key] else None for key in sorted_keys]
+    }
+
+    return res

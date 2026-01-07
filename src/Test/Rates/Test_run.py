@@ -10,7 +10,7 @@ from copy import deepcopy
 
 from Pricing.Rates import GetResults
 from Pricing.Rates.Model import HullWhite
-from Pricing.Rates.Payoffs.Callable import FixedRate 
+from Pricing.Rates.Payoffs import FixedRate 
 from Pricing.Utilities.decorators import timer
 
 def compute_result_run(mkt_data:dict,input:dict,max_workers=4)->tuple[dict]:
@@ -79,8 +79,9 @@ input={
         "max_maturity":10,
         "min_NC":3}
 }
-DataPath=r"\\Umilp-p2.cdm.cm-cic.fr\cic-lai-lae-cigogne$\1_Structuration\6_Lexifi\Market_data"
-calc_date=ql.Date(5,1,2026)
+#DataPath=r"\\Umilp-p2.cdm.cm-cic.fr\cic-lai-lae-cigogne$\1_Structuration\6_Lexifi\Market_data"
+DataPath=r"C:\Users\jorda\OneDrive\Documents\pricer_interface-main\snapshot"
+calc_date=ql.Date(11,11,2025)
 mkt_data=GetResults.retrieve_data(path_folder=DataPath,date=calc_date)
 
 print(compute_result_run(mkt_data,input,max_workers=4))

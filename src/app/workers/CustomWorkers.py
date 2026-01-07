@@ -94,12 +94,16 @@ class MktDataManager(QObject):
     def __del__(self):
         """Cleanup on deletion."""
         try:
-            if hasattr(self, 'thread') and self.thread:
-                if self.thread.isRunning():
-                    self.thread.quit()
-                    if not self.thread.wait(5000):
-                        self.thread.terminate()
-                        self.thread.wait()
+            if hasattr(self, 'thread') and self.thread is not None:
+                try:
+                    if self.thread.isRunning():
+                        self.thread.quit()
+                        if not self.thread.wait(5000):
+                            self.thread.terminate()
+                            self.thread.wait()
+                except RuntimeError:
+                    # C++ object already deleted, thread was cleaned up elsewhere
+                    pass
         except (RuntimeError, AttributeError):
             pass
 
@@ -238,10 +242,13 @@ class PriceManager(QObject):
             self.thread.start()
     
     def stop(self):
-        """Stop the task processing thread."""
+        """Stop the task processing thread gracefully."""
         self.worker.stop()
         self.thread.quit()
-        self.thread.wait()
+        # Wait with timeout to avoid blocking indefinitely
+        if not self.thread.wait(3000):
+            self.thread.terminate()
+            self.thread.wait(1000)
     
     def add_task(self, task_id: str, func: Callable, args: tuple = (), kwargs: dict = None):
         """

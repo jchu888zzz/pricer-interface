@@ -3,7 +3,7 @@ from bisect import bisect
 import QuantLib as ql
 
 from Pricing.Utilities import Functions,Dates
-from Pricing.Rates.Payoffs import Base
+from Pricing.Rates.Payoffs.Types import Base
 from collections import Counter
 
 def get_compound_rate(rates:np.ndarray,d1:ql.Date,d2:ql.Date,N=360):
@@ -34,7 +34,7 @@ class Leg:
                                                                 freq=ql.Period('3M'),
                                                                 offset=-5,
                                                                 fixing_type='in advance')
-
+            
     def precomputation(self,calc_date:ql.Date,model,data_rates:dict):
         rates,schedule=data_rates['rates'],data_rates['schedule'][1:]
 
@@ -96,6 +96,8 @@ class Leg:
         # Create mask_alive: (num_simulations, num_pay_dates)
         # Marks which coupons are still paid in each simulation path
         mask_alive = np.ones((len(stop_idxs), len(self.pay_dates)))
+
+        # print(Counter(stop_idxs))
         for i, idx in enumerate(stop_idxs):
             j = bisect(self.pay_dates, contract.pay_dates[idx])
             mask_alive[i, j:] = 0

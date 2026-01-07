@@ -115,22 +115,26 @@ class MainWindow(QMainWindow):
         self.ui.stack.setCurrentWidget(page)
         
     def closeEvent(self, event: QCloseEvent):
-        """Clean up threads before closing."""
-        try:
-            if hasattr(self, 'pricing_manager'):
+        """Clean up threads and workers before closing application."""
+        # Stop pricing manager
+        if hasattr(self, 'pricing_manager') and self.pricing_manager is not None:
+            try:
                 self.pricing_manager.stop()
-        except:
-            pass
-        
-        try:
-            if hasattr(self, 'data_manager') and hasattr(self.data_manager, 'thread'):
-                if self.data_manager.thread and self.data_manager.thread.isRunning():
-                    self.data_manager.thread.quit()
-                    self.data_manager.thread.wait()
-        except:
-            pass
-        
+            except (RuntimeError, AttributeError):
+                pass
+
+        # Stop data manager thread
+        if hasattr(self, 'data_manager') and self.data_manager is not None:
+            try:
+                thread = getattr(self.data_manager, 'thread', None)
+                if thread is not None and thread.isRunning():
+                    thread.quit()
+                    if not thread.wait(2000):
+                        thread.terminate()
+                        thread.wait(500)
+            except (RuntimeError, AttributeError):
+                pass
+
         event.accept()
-        # update checked states handled by QButtonGroup
 
 

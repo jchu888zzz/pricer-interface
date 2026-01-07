@@ -1,5 +1,7 @@
 import sys
 from pathlib import Path
+
+from Pricing.Rates.Payoffs import Autocall, Digit, FixedRate, MinMax
 pricing_root=Path(__file__).parent.parent.parent
 sys.path.insert(0,str(pricing_root))
 
@@ -10,8 +12,8 @@ import numpy as np
 from Pricing.Utilities import Display
 from Pricing.Rates import GetResults
 from Pricing.Rates.Model import  HullWhite
-from Pricing.Rates.Payoffs.Autocallable import TARN, Autocall
-from Pricing.Rates.Payoffs.Callable import Digit, FixedRate,RangeAccrual,MinMax
+from Pricing.Rates.Payoffs import TARN
+from Pricing.Rates.Payoffs import RangeAccrual
 
 #ÂDataPath =r"C:\Users\jorda\OneDrive\Documents\pricer_interface-main\snapshot"
 DataPath=r"\\Umilp-p2.cdm.cm-cic.fr\cic-lai-lae-cigogne$\1_Structuration\6_Lexifi\Market_data"
