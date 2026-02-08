@@ -1,22 +1,40 @@
+from functools import partial
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTabWidget
 
-from .Forms.SingleRate import Ui_Autocall,Ui_Digit,Ui_RangeAccrual,Ui_Tarn
+from .Forms.Rate import Ui_Autocall,Ui_Digit,Ui_RangeAccrual,Ui_Tarn,Ui_MinMax
 
-dic_currency={'EUR':['BFRTEC10','SOLDE10E','SOLBE10E','SOITA10Y','SOLIT1OE'],
-              'USD':['H15T10Y']}
+DIC_CURRENCY={'EUR':['BFRTEC10','SOLDE10E','SOLBE10E','SOITA10Y','SOLIT1OE'],
+            'USD':['H15T10Y']}
 
 class Ui_CMTPage(QWidget):
     """A tabbed widget containing several form tabs."""
     submitted = Signal(dict)  # re-emit form submissions
-    sub1=Signal()
+    copy_input=Signal(dict)
+    
+    TABS_CONFIG = [
+        ("Autocall", Ui_Autocall),
+        ("Digit", Ui_Digit),
+        ("RangeAccrual", Ui_RangeAccrual),
+        ("Tarn", Ui_Tarn),
+        ("MinMax", Ui_MinMax),
+    ]
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("tabsPage")
+        self._forms={}
         self._setup_ui()
         self._connect_signals()
 
+    def _add_forms(self):
+        for name, FormClass in self.TABS_CONFIG:
+            form = FormClass(DIC_CURRENCY)
+            form.setObjectName(f"tab_{name.lower()}")
+            self.tabs.addTab(form, name)
+            self._forms[name] = form
+            
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -24,39 +42,45 @@ class Ui_CMTPage(QWidget):
 
         self.tabs = QTabWidget(self)
         self.tabs.setObjectName("CMTTabs")
+        
+        self._add_forms()
 
+        #Set Standard value
         # Tab 1 - Autocall
-        self.form_autocall = Ui_Autocall(dic_currency)
-        self.form_autocall.setObjectName("tab_autocall")
-        self.tabs.addTab(self.form_autocall, "Autocall")
-
+        self._forms['Autocall'].autocall_level.setValue(3.5)
+        self._forms['Autocall'].coupon_level.setValue(4.5)
         # Tab 2 - Digit
-        self.form_digit = Ui_Digit(dic_currency)
-        self.form_digit.setObjectName("tab_digit")
-        self.tabs.addTab(self.form_digit, "Digit")
+        self._forms['Digit'].coupon_level.setValue(3.5)
 
         # Tab 3 - Range Accrual
-        self.form_range = Ui_RangeAccrual(dic_currency)
-        self.form_range.setObjectName("tab_rangeaccrual")
-        self.tabs.addTab(self.form_range, "RangeAccrual")
 
         #Tab 4 -TARN
-        self.form_tarn = Ui_Tarn(dic_currency)
-        self.form_tarn.setObjectName("tab_tarn")
-        self.tabs.addTab(self.form_tarn, "TARN")
+        self._forms['Tarn'].coupon_level.setValue(3.5)
+        
+        #Tab 5 -MinMax
+        self._forms['MinMax'].floor.setValue(3)
+        self._forms['MinMax'].floor.setValue(5)
 
         layout.addWidget(self.tabs)
 
     def _connect_signals(self):
         # re-emit submitted signal with source tab info
-        self.form_autocall.submitted.connect(lambda d: self._on_submitted(d, "Autocall"))
-        self.form_digit.submitted.connect(lambda d: self._on_submitted(d, "Digit"))
-        self.form_range.submitted.connect(lambda d: self._on_submitted(d, "RangeAccrual"))
-        self.form_range.submitted.connect(lambda d: self._on_submitted(d, "TARN"))
-
-    def _on_submitted(self, input_data: dict, source_tab: str):
-        # add source metadata and re-emit
-        data = {'param':input_data,
+        for name, form in self._forms.items():
+            form.submitted.connect(partial(self._on_submitted, source_tab=name))
+            form.copy_input.connect(partial(self._on_copy, source_tab=name))
+            
+    def _retrieve_param(self, input_data: dict, source_tab: str):
+        # add source metadata
+        param = {'param':input_data,
                 "_source_tab":source_tab,
                 "_source_page":"CMT"}
-        self.submitted.emit(data)
+        return param
+    
+    def _on_copy(self, input_data: dict, source_tab: str):
+        param=self._retrieve_param(input_data,source_tab)
+        self.copy_input.emit(param)
+            
+    def _on_submitted(self, input_data: dict, source_tab: str):
+        param=self._retrieve_param(input_data,source_tab)
+        self.submitted.emit(param)
+

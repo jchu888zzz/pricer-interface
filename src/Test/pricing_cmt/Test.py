@@ -14,7 +14,7 @@ DataPath =r"C:\Users\jorda\OneDrive\Documents\pricer_interface-main\snapshot"
 calc_date=ql.Date(11,11,2025)
 mkt_data=GetResults.retrieve_data(path_folder=DataPath,date=calc_date)
 #select test from contracts
-input=test_autocall_bond
+input=test_range_bond
 
 input,res=GetResults.compute_result_cmt(mkt_data,input)
 Display.display_pricing_results(res)

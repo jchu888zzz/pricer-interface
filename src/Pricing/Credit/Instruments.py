@@ -82,9 +82,9 @@ class Credit_Single:
 
         start=Dates.find_next_cds_standard(calc_date)
         end=start+ql.Period(self.tenors[-1])
-        self.standard_schedule=Dates.compute_target_schedule(start,end,ql.Period('3M'))
+        self.schedule=Dates.compute_target_schedule(start,end,ql.Period('3M'))
 
-        self.standard_grid=np.array([cal.yearFraction(calc_date,d) for d in self.standard_schedule])
+        self.tgrid=np.array([cal.yearFraction(calc_date,d) for d in self.schedule])
 
     def __repr__(self):
         return (f'Credit {self.undl}\n'
@@ -105,4 +105,4 @@ def retrieve_credit_single_from_dataframe(df:pd.DataFrame,undl_name:str,calc_dat
                 tenors.append(tenor)
                 quotes.append(quote)
 
-    return Credit_Single(undl_name,{x:y for x,y in zip(tenors,quotes)},calc_date)    
+    return Credit_Single(undl_name,{x:y for x,y in zip(tenors,quotes)},calc_date)  

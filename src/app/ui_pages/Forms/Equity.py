@@ -5,17 +5,17 @@ from PySide6.QtWidgets import (
 
 from app.widgets.CustomWidgets import (IssueDate,Currency,Maturity,FixingOffset,
                                     Frequency,AutocallLevel,CouponLevel,MemoryEffect,
-                                    InFine,Underlying,NC,InitialStrikeDate
+                                    InFine,SingleUnderlying,NC,InitialStrikeDate
                                     )
 
 
-from app.ui_pages.Forms.SolvingChoice import Ui_SolvingFormEquity
+from app.ui_pages.Forms.SolvingChoice import Ui_PricingForm
 from typing import Union
-
-
+    
 class Ui_Autocall(QWidget):
     """Form for Autocall"""
     submitted = Signal(dict)
+    copy_input=Signal(dict)
 
     def __init__(self,dic_currency:dict[str:str]):
         """ dic of undl per currency"""
@@ -37,7 +37,7 @@ class Ui_Autocall(QWidget):
         self.currency=Currency(self.dic_currency)
         layout1.addRow("Currency :",self.currency)
 
-        self.undl=Underlying(self.dic_currency)
+        self.undl=SingleUnderlying(self.dic_currency)
         layout1.addRow("Underlying :",self.undl)
 
         layout.addLayout(layout1)
@@ -66,10 +66,9 @@ class Ui_Autocall(QWidget):
         self.autocall_level.setValue(100)
         layout1.addRow("Autocall Level :", self.autocall_level)
 
-
         layout2=QHBoxLayout()
         
-        self.solving_layout=Ui_SolvingFormEquity()
+        self.solving_layout=Ui_PricingForm()
         layout2.addLayout(self.solving_layout)
         layout.addLayout(layout2)
         self._setup_logic()
@@ -79,6 +78,7 @@ class Ui_Autocall(QWidget):
         self.currency.currentTextChanged.connect(self.undl._display)
         # Connect submit
         self.solving_layout.submit_btn.clicked.connect(self._on_submit)
+        self.solving_layout.input_btn.clicked.connect(self._on_copy)
 
     def _validate(self) -> Union[bool, str]:
         """Validate required fields and logical constraints. Returns (ok, message)."""
@@ -88,16 +88,10 @@ class Ui_Autocall(QWidget):
             return False, "Maturity is required"
         
         return True, ""
-
-    def _on_submit(self):
-        ok, msg = self._validate()
-        if not ok:
-            QMessageBox.warning(self, "Validation error", msg)
-            return
-        cur=self.currency.currentText()
-
+    
+    def _retrieve_param(self):
         param = {
-            "currency":cur,
+            "currency":self.currency.currentText(),
             "issue_date": self.issue_date.date().toString("dd.MM.yyyy"),
             "initial_strike_date":self.initial_strike_date.date().toString("dd.MM.yyyy"),
             "maturity": self.maturity.text(),
@@ -107,7 +101,17 @@ class Ui_Autocall(QWidget):
             "autocall_level": str(self.autocall_level.value()),
             "underlying":self.undl.currentText()
         }
-        
+        return param
+    
+    def _on_copy(self):
+        param=self._retrieve_param()
+        self.copy_input.emit(param)
+                
+    def _on_submit(self):
+        ok, msg = self._validate()
+        if not ok:
+            QMessageBox.warning(self, "Validation error", msg)
+            return
+        param=self._retrieve_param()
         # Emit structured data and show brief confirmation
         self.submitted.emit(param)
-

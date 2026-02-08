@@ -1,8 +1,12 @@
-from PySide6.QtWidgets import QMainWindow, QWidget, QButtonGroup,QMessageBox
-from PySide6.QtGui import QCloseEvent
 import os
+
+from functools import partial
 import QuantLib as ql
 import pandas as pd
+import json
+
+from PySide6.QtWidgets import QMainWindow, QWidget, QButtonGroup,QMessageBox,QApplication
+from PySide6.QtGui import QCloseEvent
 
 from .workers.CustomWorkers import PriceManager,MktDataManager
 from .ui_pages.MainWindow import Ui_MainWindow
@@ -43,86 +47,94 @@ class MainWindow(QMainWindow):
             #print(f"Failed to load QSS from {path}: {e}")
 
     def load_data(self):
-        self.ui.pageHome.action_button.setEnabled(False)
-        self.ui.pageHome._animate_loading()
+        self.ui._pages["Home"].action_button.setEnabled(False)
+        self.ui._pages["Home"]._animate_loading()
         self.data_manager.completed.connect(self.retrieve_mkt_data)
-        self.data_manager.failed.connect(lambda err: self.ui.pageHome.setMessage(err))
-        #date=ql.Date.todaysDate()
-        date=ql.Date(11,11,2025)
+        self.data_manager.failed.connect(lambda err: self.ui._pages["Home"].setMessage(err))
+        date=ql.Date.todaysDate()
         self.data_manager.retrieve(date)
 
     def retrieve_mkt_data(self,mkt_data:dict[str:pd.DataFrame]):
-        self.ui.pageHome.action_button.setEnabled(True)
-        self.ui.pageHome._timer.stop()
-        self.ui.pageHome.loading_label.setText("Market Data imported")
+        self.ui._pages["Home"].action_button.setEnabled(True)
+        self.ui._pages["Home"]._timer.stop()
+        self.ui._pages["Home"].loading_label.setText("Market Data imported")
         self.mkt_data=mkt_data
 
     def get_result(self,input:dict):
         if not hasattr(self,'mkt_data'):
             QMessageBox.warning(self, "Validation error", "Please load data before pricing")
         PAGE_MAPPING={"Rate":RateGetResults.compute_result_rate,
-                      "CMT":RateGetResults.compute_result_cmt,
-                      "SpreadCMT":RateGetResults.compute_result_cmt}
+                        "CMT":RateGetResults.compute_result_cmt,
+                        "SpreadCMT":RateGetResults.compute_result_cmt}
         
         self.pricing_manager.add_task(f"task_{self.pricing_manager.task_count}",
-                                      PAGE_MAPPING.get(input["_source_page"]),args=(self.mkt_data,input))
+                                        PAGE_MAPPING.get(input["_source_page"]),args=(self.mkt_data,input))
     
     def get_result_equity(self,input:dict):
         
         self.pricing_manager.add_task(f"task_{self.pricing_manager.task_count}",
-                                      EquityGetResults.compute_result,args=input)
+                                        EquityGetResults.compute_result,args=(input,))
 
+    def _dict_to_txt(self,data:dict,indent:int=0)->str:
+        return json.dumps(data,indent=indent)
+    
+    def export_input_to_clipboard(self,input:dict):
+        text=self._dict_to_txt(input)
+        clipboard=QApplication.clipboard()
+        clipboard.setText(text)
+    
     def _setup_logic(self):
         # Wire nav buttons to stacked widget pages
-        self.ui.btnHome.clicked.connect(lambda: self._set_page(self.ui.pageHome))
-        self.ui.btnEquity.clicked.connect(lambda: self._set_page(self.ui.pageEquity))
-        self.ui.btnRate.clicked.connect(lambda: self._set_page(self.ui.pageRate))
-        self.ui.btnCMT.clicked.connect(lambda: self._set_page(self.ui.pageCMT))
-        self.ui.btnSpreadCMT.clicked.connect(lambda: self._set_page(self.ui.pageSpreadCMT))
-
-        self.ui.pageHome.action_button.clicked.connect(self.load_data)
-        self.ui.pageRate.submitted.connect(self.get_result)
-        self.ui.pageCMT.submitted.connect(self.get_result)
-        self.ui.pageSpreadCMT.submitted.connect(self.get_result)
-        self.ui.pageEquity.submitted.connect(self.get_result_equity)
-
         # Keep nav buttons exclusive
         self._nav_group = QButtonGroup(self)
         self._nav_group.setExclusive(True)
-        self._nav_group.addButton(self.ui.btnHome)
-        self._nav_group.addButton(self.ui.btnEquity)
-        self._nav_group.addButton(self.ui.btnRate)
-        self._nav_group.addButton(self.ui.btnCMT)
-        self._nav_group.addButton(self.ui.btnSpreadCMT)
+        for name, btn in self.ui._side_btns.items():
+            btn.clicked.connect(partial(self._set_page, name=name))
+            self._nav_group.addButton(btn)
 
+        #Setup button for data
+        self.ui._pages["Home"].action_button.clicked.connect(self.load_data)
+        
+        #Setup Submissions
+        for name in ["Rate","CMT","Spread CMT"]:
+            self.ui._pages[name].submitted.connect(self.get_result)
+        self.ui._pages["Equity"].submitted.connect(self.get_result_equity)
+        
+        #Setup Input
+        for name in ["Rate","CMT","Spread CMT","Equity"]:
+            self.ui._pages[name].copy_input.connect(self.export_input_to_clipboard)
 
         # Exit action
         self.ui.actionExit.triggered.connect(self.close)
         # expose a simple main action button behavior if needed
         # maintain initial page
-        self._set_page(self.ui.pageHome)
+        self._set_page("Home")
 
-    def _set_page(self, page:QWidget):
+    def _set_page(self, name:str):
+        page=self.ui._pages[name]
         self.ui.stack.setCurrentWidget(page)
-
+        
     def closeEvent(self, event: QCloseEvent):
-        """Clean up threads before closing."""
-        try:
-            if hasattr(self, 'pricing_manager'):
+        """Clean up threads and workers before closing application."""
+        # Stop pricing manager
+        if hasattr(self, 'pricing_manager') and self.pricing_manager is not None:
+            try:
                 self.pricing_manager.stop()
-        except:
-            pass
-        
-        try:
-            if hasattr(self, 'data_manager') and hasattr(self.data_manager, 'thread'):
-                if self.data_manager.thread and self.data_manager.thread.isRunning():
-                    self.data_manager.thread.quit()
-                    self.data_manager.thread.wait()
-        except:
-            pass
-        
-        event.accept()
-        # update checked states handled by QButtonGroup
+            except (RuntimeError, AttributeError):
+                pass
 
+        # Stop data manager thread
+        if hasattr(self, 'data_manager') and self.data_manager is not None:
+            try:
+                thread = getattr(self.data_manager, 'thread', None)
+                if thread is not None and thread.isRunning():
+                    thread.quit()
+                    if not thread.wait(2000):
+                        thread.terminate()
+                        thread.wait(500)
+            except (RuntimeError, AttributeError):
+                pass
+
+        event.accept()
 
 

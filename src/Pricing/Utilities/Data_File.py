@@ -22,7 +22,7 @@ def get_filename_from_date(date:ql.Date,prefix='market_data_') -> str:
     name= y +'-'+ m +'-'+ d
     return prefix + name +'.xlsx'
 
-def select_row_from_keywords(df:pd.DataFrame,col:list[str],keywords:list[str]):
+def select_row_from_keywords(df:pd.DataFrame,col:str,keywords:list[str]):
     mask=np.ones(len(df)).astype(bool)
     for word in keywords:
         mask*=df[col].str.contains(word)

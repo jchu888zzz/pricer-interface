@@ -5,13 +5,14 @@ from PySide6.QtWidgets import (
 
 from app.widgets.CustomWidgets import (IssueDate,Currency,Maturity,FixingOffset,
                                         Frequency,FixingType,AutocallLevel,CouponLevel,MemoryEffect,
-                                        InFine,Underlying,NC,CallableWidget,LowerboundLevel,UpperboundLevel,
-                                        Target,Coupon,GuaranteedCouponWidget
+                                        InFine,SingleUnderlying,SpreadUnderlying,
+                                        NC,CallableWidget,LowerboundLevel,UpperboundLevel,
+                                        Target,Coupon,GuaranteedCouponWidget,Floor,Cap
                                         )
 
-
 from app.ui_pages.Forms.SolvingChoice import Ui_SolvingForm,Ui_PricingForm
-from typing import Union
+
+from Pricing.Utilities import InputConverter
 
 def setup_widget_with_suffix(item,suffix:str):
     sub_layout=QHBoxLayout()
@@ -28,10 +29,20 @@ def bool_to_str(b:bool):
         return "true"
     else:
         return "false"
-    
+
+def get_underlying_widget(dic_currency:dict) ->SingleUnderlying | SpreadUnderlying:
+    value_type=list(dic_currency.values())[0]
+    if isinstance(value_type,list):
+        return SingleUnderlying(dic_currency)
+    elif isinstance(value_type,dict):
+        return SpreadUnderlying(dic_currency)
+    else:
+        raise ValueError("value type for arg not recognized")    
+
 class Ui_Autocall(QWidget):
     """Form for Autocall"""
     submitted = Signal(dict)
+    copy_input=Signal(dict)
 
     def __init__(self,dic_currency:dict[str:str]):
         """ dic of undl per currency"""
@@ -53,7 +64,7 @@ class Ui_Autocall(QWidget):
         self.currency=Currency(self.dic_currency)
         layout1.addRow("Currency :",self.currency)
 
-        self.undl=Underlying(self.dic_currency)
+        self.undl=get_underlying_widget(self.dic_currency)
         layout1.addRow("Underlying :",self.undl)
 
         layout.addLayout(layout1)
@@ -66,7 +77,6 @@ class Ui_Autocall(QWidget):
         layout1.addRow("Maturity (in years) :",self.maturity)
 
         self.fixing_offset = FixingOffset()
-        self.fixing_offset.setValue(-5)
         layout1.addRow("Fixing Days Offset :", self.fixing_offset)
 
         self.frequency = Frequency()
@@ -104,8 +114,9 @@ class Ui_Autocall(QWidget):
         self.solving_layout.choice.currentTextChanged.connect(self.solving_layout._display)
         # Connect submit
         self.solving_layout.submit_btn.clicked.connect(self._on_submit)
+        self.solving_layout.input_btn.clicked.connect(self._on_copy)
 
-    def _validate(self) -> Union[bool, str]:
+    def _validate(self) -> tuple[bool,str]:
         """Validate required fields and logical constraints. Returns (ok, message)."""
         if not self.issue_date.date():
             return False, "Issue Date is required."
@@ -114,15 +125,9 @@ class Ui_Autocall(QWidget):
         
         return True, ""
 
-    def _on_submit(self):
-        ok, msg = self._validate()
-        if not ok:
-            QMessageBox.warning(self, "Validation error", msg)
-            return
-        cur=self.currency.currentText()
-
+    def retrieve_param(self):
         param = {
-            "currency":cur,
+            "currency":self.currency.currentText(),
             "issue_date": self.issue_date.date().toString("dd.MM.yyyy"),
             "maturity": self.maturity.text(),
             "fixing_days_offset": str(self.fixing_offset.value()),
@@ -131,20 +136,32 @@ class Ui_Autocall(QWidget):
             "NC":str(self.NC.value()),
             "autocall_level": str(self.autocall_level.value())+'%',
             "coupon_level": str(self.coupon_level.value())+'%',
-            "underlying1":self.undl.currentText(),
             "memory_effect":bool_to_str(self.memory_effect.isChecked()),
             "in-fine":bool_to_str(self.in_fine.isChecked())
         }
-        
+        undl_data=self.undl._retrieve_input()
+        param.update(undl_data)
         solving_data=self.solving_layout._retrieve_input()
         param.update(solving_data)
-
+        return param
+    
+    def _on_copy(self):
+        param=self.retrieve_param()
+        self.copy_input.emit(param)
+        
+    def _on_submit(self):
+        ok, msg = self._validate()
+        if not ok:
+            QMessageBox.warning(self, "Validation error", msg)
+            return
+        param=self.retrieve_param()
         # Emit structured data and show brief confirmation
         self.submitted.emit(param)
 
 class Ui_Tarn(QWidget):
     """Form for TARN"""
     submitted = Signal(dict)
+    copy_input=Signal(dict)
 
     def __init__(self,dic_currency:dict[str:str]):
         """ dic of undl per currency"""
@@ -167,7 +184,7 @@ class Ui_Tarn(QWidget):
         self.currency=Currency(self.dic_currency)
         layout1.addRow("Currency",self.currency)
 
-        self.undl=Underlying(self.dic_currency)
+        self.undl=get_underlying_widget(self.dic_currency)
         layout1.addRow("Underlying",self.undl)
 
         layout.addLayout(layout1)
@@ -198,6 +215,7 @@ class Ui_Tarn(QWidget):
         layout1.addRow("Coupon :", self.coupon)
 
         self.coupon_level = CouponLevel()
+        self.coupon_level.setValue(2.5)
         layout1.addRow("Coupon Level :", self.coupon_level)
 
         self.in_fine = InFine()
@@ -221,8 +239,9 @@ class Ui_Tarn(QWidget):
 
         # Connect submit
         self.solving_layout.submit_btn.clicked.connect(self._on_submit)
+        self.solving_layout.input_btn.clicked.connect(self._on_copy)
 
-    def _validate(self) -> Union[bool, str]:
+    def _validate(self) -> tuple[bool,str]:
         """Validate required fields and logical constraints. Returns (ok, message)."""
         if not self.issue_date.date():
             return False, "Issue Date is required."
@@ -233,16 +252,10 @@ class Ui_Tarn(QWidget):
             return False, "Target must be superior of the sum of guaranteed coupon"
         
         return True, ""
-
-    def _on_submit(self):
-        ok, msg = self._validate()
-        if not ok:
-            QMessageBox.warning(self, "Validation error", msg)
-            return
-        cur=self.currency.currentText()
-
+    
+    def retrieve_param(self):
         param = {
-            "currency":cur,
+            "currency":self.currency.currentText(),
             "issue_date": self.issue_date.date().toString("dd.MM.yyyy"),
             "maturity": self.maturity.text(),
             "fixing_days_offset": str(self.fixing_offset.value()),
@@ -251,23 +264,38 @@ class Ui_Tarn(QWidget):
             "target":str(self.target.value())+'%',
             "coupon":str(self.coupon.value())+'%',
             "coupon_level": str(self.coupon_level.value())+'%',
-            "underlying1":self.undl.currentText(),
             "in-fine":bool_to_str(self.in_fine.isChecked())
         }
+        
+        undl_data=self.undl._retrieve_input()
+        param.update(undl_data)
         
         guaranteed_coupon_data=self.guaranteed_coupon_widget._retrieve_input()
         param.update(guaranteed_coupon_data)
 
         solving_data=self.solving_layout._retrieve_input()
         param.update(solving_data)
+        
+        return param
+    
 
+    def _on_copy(self):
+        param=self.retrieve_param()
+        self.copy_input.emit(param)
+        
+    def _on_submit(self):
+        ok, msg = self._validate()
+        if not ok:
+            QMessageBox.warning(self, "Validation error", msg)
+            return
+        param=self.retrieve_param()
         # Emit structured data and show brief confirmation
         self.submitted.emit(param)
 
 
 class Ui_Digit(QWidget):
     submitted = Signal(dict)
-    sub1=Signal()
+    copy_input=Signal(dict)
 
     def __init__(self,dic_currency:dict[str:str]):
         """ dic of undl per currency"""
@@ -290,7 +318,7 @@ class Ui_Digit(QWidget):
         self.currency=Currency(self.dic_currency)
         layout1.addRow("Currency :",self.currency)
 
-        self.undl=Underlying(self.dic_currency)
+        self.undl=get_underlying_widget(self.dic_currency)
         layout1.addRow("Underlying :",self.undl)
 
         self.issue_date=IssueDate()
@@ -311,6 +339,7 @@ class Ui_Digit(QWidget):
         layout1.addRow("Fixing Type :", self.fixing_type)
 
         self.coupon_level = CouponLevel()
+        self.coupon_level.setValue(2.0)
         layout1.addRow("Coupon Level :", self.coupon_level)
 
         self.memory_effect = MemoryEffect()
@@ -338,8 +367,9 @@ class Ui_Digit(QWidget):
         self.callable_widget.diff_calendar.toggled.connect(self.callable_widget.param_stack.setCurrentIndex)
         # Connect submit
         self.solving_layout.submit_btn.clicked.connect(self._on_submit)
+        self.solving_layout.input_btn.clicked.connect(self._on_copy)
 
-    def _validate(self) -> Union[bool, str]:
+    def _validate(self) -> tuple[bool,str]:
         """Validate required fields and logical constraints. Returns (ok, message)."""
         if not self.issue_date.date():
             return False, "Issue Date is required."
@@ -349,39 +379,53 @@ class Ui_Digit(QWidget):
         if self.callable_widget.diff_calendar.isChecked() :
             if not  self.issue_date.date() < self.callable_widget.first_call_date.date() :
                 return False, "First call date cannot be before start date."
+            call_freq=self.callable_widget.call_frequency.currentText()
+            pay_freq=self.frequency.currentText()
+            if InputConverter.freq_converter(call_freq) <= InputConverter.freq_converter(pay_freq):
+                return False,"Call Frequency should be superior to payment frequency"
         
         return True, ""
 
-    def _on_submit(self):
-        ok, msg = self._validate()
-        if not ok:
-            QMessageBox.warning(self, "Validation error", msg)
-            return
-        cur=self.currency.currentText()
-
+    def retrieve_param(self):
         param = {
-            "currency":cur,
+            "currency":self.currency.currentText(),
             "issue_date": self.issue_date.date().toString("dd.MM.yyyy"),
             "maturity": self.maturity.text(),
             "fixing_days_offset": str(self.fixing_offset.value()),
             "frequency": self.frequency.currentText(),
             "fixing_type":self.fixing_type.currentText(),
             "coupon_level": str(self.coupon_level.value())+'%',
-            "underlying1": self.undl.currentText(),
             "memory_effect":bool_to_str(self.memory_effect.isChecked()),
             "in-fine":bool_to_str(self.in_fine.isChecked())
         }
+        
+        undl_data=self.undl._retrieve_input()
+        param.update(undl_data)
         
         solving_data=self.solving_layout._retrieve_input()
         param.update(solving_data)
 
         callable_data=self.callable_widget._retrieve_input()
         param.update(callable_data)
+        
+        return param
+    
+    def _on_copy(self):
+        param=self.retrieve_param()
+        self.copy_input.emit(param)
+        
+    def _on_submit(self):
+        ok, msg = self._validate()
+        if not ok:
+            QMessageBox.warning(self, "Validation error", msg)
+            return
+        param=self.retrieve_param()
         # Emit structured data and show brief confirmation
         self.submitted.emit(param)
 
 class Ui_RangeAccrual(QWidget):
     submitted = Signal(dict)
+    copy_input=Signal(dict)
 
     def __init__(self,dic_currency:dict[str:str]):
         """ dic of undl per currency"""
@@ -405,7 +449,7 @@ class Ui_RangeAccrual(QWidget):
         self.currency=Currency(self.dic_currency)
         layout1.addRow("Currency :",self.currency)
 
-        self.undl=Underlying(self.dic_currency)
+        self.undl=get_underlying_widget(self.dic_currency)
         layout1.addRow("Underlying :",self.undl)
 
         self.issue_date=IssueDate()
@@ -452,8 +496,9 @@ class Ui_RangeAccrual(QWidget):
         self.callable_widget.diff_calendar.toggled.connect(self.callable_widget.param_stack.setCurrentIndex)
         # Connect submit
         self.solving_layout.submit_btn.clicked.connect(self._on_submit)
+        self.solving_layout.input_btn.clicked.connect(self._on_copy)
 
-    def _validate(self) -> Union[bool, str]:
+    def _validate(self) -> tuple[bool,str]:
         """Validate required fields and logical constraints. Returns (ok, message)."""
         if not self.issue_date.date():
             return False, "Issue Date is required."
@@ -466,17 +511,15 @@ class Ui_RangeAccrual(QWidget):
         if self.callable_widget.diff_calendar.isChecked() :
             if not  self.issue_date.date() < self.callable_widget.first_call_date.date() :
                 return False, "First call date cannot be before start date."
-        
+            call_freq=self.callable_widget.call_frequency.currentText()
+            pay_freq=self.frequency.currentText()
+            if InputConverter.freq_converter(call_freq) <= InputConverter.freq_converter(pay_freq):
+                return False,"Call Frequency should be superior to payment frequency"
         return True, ""
 
-    def _on_submit(self):
-        ok, msg = self._validate()
-        if not ok:
-            QMessageBox.warning(self, "Validation error", msg)
-            return
-        cur=self.currency.currentText()
+    def retrieve_param(self):
         param = {
-            "currency":cur,
+            "currency":self.currency.currentText(),
             "issue_date": self.issue_date.date().toString("dd.MM.yyyy"),
             "maturity": self.maturity.text(),
             "fixing_days_offset": str(self.fixing_offset.value()),
@@ -484,20 +527,35 @@ class Ui_RangeAccrual(QWidget):
             "fixing_type":self.fixing_type.currentText(),
             "lower_bound": str(self.lowerbound_level.value())+'%',
             "upper_bound":str(self.upperbound_level.value())+'%',
-            "underlying1":self.undl.currentText(),
             "in-fine":bool_to_str(self.in_fine.isChecked())
         }
+        
+        undl_data=self.undl._retrieve_input()
+        param.update(undl_data)
         
         solving_data=self.solving_layout._retrieve_input()
         param.update(solving_data)
 
         callable_data=self.callable_widget._retrieve_input()
         param.update(callable_data)
+        return param
+    
+    def _on_copy(self):
+        param=self.retrieve_param()
+        self.copy_input.emit(param)
+        
+    def _on_submit(self):
+        ok, msg = self._validate()
+        if not ok:
+            QMessageBox.warning(self, "Validation error", msg)
+            return
+        param=self.retrieve_param()
         # Emit structured data and show brief confirmation
         self.submitted.emit(param)
 
 class Ui_FixedRate(QWidget):
     submitted = Signal(dict)
+    copy_input=Signal(dict)
 
     def __init__(self,dic_currency):
         super().__init__()
@@ -533,6 +591,8 @@ class Ui_FixedRate(QWidget):
         layout1.addRow("In fine :", self.in_fine)
 
         self.callable_widget = CallableWidget()
+        self.callable_widget.is_callable.setChecked(True)
+        self.callable_widget.stack.setCurrentIndex(1)
         layout1.addRow(self.callable_widget)
 
         layout.addLayout(layout1)
@@ -549,8 +609,9 @@ class Ui_FixedRate(QWidget):
         self.callable_widget.diff_calendar.toggled.connect(self.callable_widget.param_stack.setCurrentIndex)
         # Connect submit
         self.solving_layout.submit_btn.clicked.connect(self._on_submit)
+        self.solving_layout.input_btn.clicked.connect(self._on_copy)
 
-    def _validate(self) -> Union[bool, str]:
+    def _validate(self) -> tuple[bool,str]:
         """Validate required fields and logical constraints. Returns (ok, message)."""
         if not self.issue_date.date():
             return False, "Issue Date is required."
@@ -560,18 +621,16 @@ class Ui_FixedRate(QWidget):
         if self.callable_widget.diff_calendar.isChecked() :
             if not  self.issue_date.date() < self.callable_widget.first_call_date.date() :
                 return False, "First call date cannot be before start date."
+            call_freq=self.callable_widget.call_frequency.currentText()
+            pay_freq=self.frequency.currentText()
+            if InputConverter.freq_converter(call_freq) <= InputConverter.freq_converter(pay_freq):
+                return False,"Call Frequency should be superior to payment frequency"
         
         return True, ""
-
-    def _on_submit(self):
-        ok, msg = self._validate()
-        if not ok:
-            QMessageBox.warning(self, "Validation error", msg)
-            return
-        cur=self.currency.currentText()
-
+    
+    def retrieve_param(self):
         param = {
-            "currency":cur,
+            "currency":self.currency.currentText(),
             "issue_date": self.issue_date.date().toString("dd.MM.yyyy"),
             "maturity": self.maturity.text(),
             "fixing_days_offset": '-10',
@@ -584,5 +643,149 @@ class Ui_FixedRate(QWidget):
 
         callable_data=self.callable_widget._retrieve_input()
         param.update(callable_data)
+        return param
+    
+    def _on_copy(self):
+        param=self.retrieve_param()
+        self.copy_input.emit(param)
+        
+    def _on_submit(self):
+        ok, msg = self._validate()
+        if not ok:
+            QMessageBox.warning(self, "Validation error", msg)
+            return
+        param=self.retrieve_param()
+        # Emit structured data and show brief confirmation
+        self.submitted.emit(param)
+        
+class Ui_MinMax(QWidget):
+    submitted = Signal(dict)
+    copy_input=Signal(dict)
+
+    def __init__(self,dic_currency:dict[str:str]):
+        """ dic of undl per currency"""
+        super().__init__()
+        self.dic_currency=dic_currency
+        self.setup_ui()
+
+    def setup_ui(self):
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setObjectName("formRangeAccrual")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(20, 12, 20, 12)
+        layout.setSpacing(50)
+
+        # Fields
+        
+        layout1 = QFormLayout()
+        layout1.setContentsMargins(20, 12, 20, 12)
+        layout1.setSpacing(12)
+
+        self.currency=Currency(self.dic_currency)
+        layout1.addRow("Currency :",self.currency)
+
+        self.undl=get_underlying_widget(self.dic_currency)
+        layout1.addRow("Underlying :",self.undl)
+
+        self.issue_date=IssueDate()
+        layout1.addRow("Issue Date :",self.issue_date)
+
+        self.maturity=Maturity()
+        self.maturity.setValue(5)
+        layout1.addRow("Maturity (in years) :", self.maturity)
+
+        self.fixing_offset = FixingOffset()
+        layout1.addRow("Fixing Days Offset :", self.fixing_offset)
+
+        self.frequency = Frequency()
+        layout1.addRow("Frequency :", self.frequency)
+
+        self.fixing_type = FixingType()
+        layout1.addRow("Fixing Type :", self.fixing_type)
+
+        self.floor = Floor()
+        layout1.addRow("Floor :", self.floor)
+
+        self.cap =Cap()
+        layout1.addRow("Cap :", self.cap)
+
+        self.in_fine = InFine()
+        layout1.addRow("In fine :", self.in_fine)
+
+        self.callable_widget = CallableWidget()
+        layout1.addRow(self.callable_widget)
+
+        layout.addLayout(layout1)
+
+        layout2=QHBoxLayout()
+        self.solving_layout=Ui_PricingForm()
+        layout2.addLayout(self.solving_layout)
+        layout.addLayout(layout2)
+        self._setup_logic()
+
+    def _setup_logic(self):
+        #Create connections to change based on currency
+        self.currency.currentTextChanged.connect(self.undl._display)
+
+        # checkbox toggles visibility of specific calendar
+        self.callable_widget.is_callable.toggled.connect(self.callable_widget.stack.setCurrentIndex)
+        #self.callable_widget.diff_calendar.toggled.connect(self.callable_widget.param_stack.setCurrentIndex)
+        # Connect submit
+        self.solving_layout.submit_btn.clicked.connect(self._on_submit)
+        self.solving_layout.input_btn.clicked.connect(self._on_copy)
+
+    def _validate(self) -> tuple[bool,str]:
+        """Validate required fields and logical constraints. Returns (ok, message)."""
+        if not self.issue_date.date():
+            return False, "Issue Date is required."
+        if not self.maturity.value():
+            return False, "Maturity is required"
+        
+        if self.floor.value() > self.cap.value():
+            return False, "Cap must be superior to floor"
+
+        if self.callable_widget.diff_calendar.isChecked() :
+            if not  self.issue_date.date() < self.callable_widget.first_call_date.date() :
+                return False, "First call date cannot be before start date."
+            call_freq=self.callable_widget.call_frequency.currentText()
+            pay_freq=self.frequency.currentText()
+            if InputConverter.freq_converter(call_freq) <= InputConverter.freq_converter(pay_freq):
+                return False,"Call Frequency should be superior to payment frequency"
+        
+        return True, ""
+
+    def retrieve_param(self):
+        param = {
+            "currency":self.currency.currentText(),
+            "issue_date": self.issue_date.date().toString("dd.MM.yyyy"),
+            "maturity": self.maturity.text(),
+            "fixing_days_offset": str(self.fixing_offset.value()),
+            "frequency": self.frequency.currentText(),
+            "fixing_type":self.fixing_type.currentText(),
+            "floor": str(self.floor.value())+'%',
+            "cap":str(self.cap.value())+'%',
+            "in-fine":bool_to_str(self.in_fine.isChecked())
+        }
+        
+        undl_data=self.undl._retrieve_input()
+        param.update(undl_data)
+        
+        solving_data=self.solving_layout._retrieve_input()
+        param.update(solving_data)
+
+        callable_data=self.callable_widget._retrieve_input()
+        param.update(callable_data)
+        return param
+    
+    def _on_copy(self):
+        param=self.retrieve_param()
+        self.copy_input.emit(param)
+        
+    def _on_submit(self):
+        ok, msg = self._validate()
+        if not ok:
+            QMessageBox.warning(self, "Validation error", msg)
+            return
+        param=self.retrieve_param()
         # Emit structured data and show brief confirmation
         self.submitted.emit(param)

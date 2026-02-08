@@ -8,8 +8,8 @@ import QuantLib as ql
 ice_path = "//Umilp-p2.cdm.cm-cic.fr/cic-lai-lae-cigogne$/1_Structuration/13bis_ICE"
 spread_path = "//Umilp-p2.cdm.cm-cic.fr/cic-lai-lae-cigogne$/1_Structuration/6_Lexifi/Credit spread CIC"
 markit_path = "//Umilp-p2.cdm.cm-cic.fr/cic-lai-lae-cigogne$/1_Structuration/13_Markit/Market_Data"
-
-path_markit_names=r"\\Umilp-p2.cdm.cm-cic.fr\cic-lai-lae-cigogne$\1_Structuration\19_Quant\Methodo Funding\Markit\Names.xlsx"
+path_markit_names=r"C:\Users\jorda\OneDrive\Documents\pricer-interface-main2\Markit_names.xlsx"
+#path_markit_names=r"\\Umilp-p2.cdm.cm-cic.fr\cic-lai-lae-cigogne$\1_Structuration\19_Quant\Methodo Funding\Markit\Names.xlsx"
 ref_table = pd.read_excel(path_markit_names, header = 0)
 
 
@@ -71,7 +71,8 @@ def convert_input(input:dict) -> dict:
     """ convert input and fill values to compute results"""
     res=input.copy()
 
-    res["MC"] = 1/365, 10000
+    res["Nsim"] = 10000
+    res["dt"]=1/365
     value_date=ql.TARGET().advance(ql.Date.todaysDate(), -1, ql.Days)
     res["value_date"] = value_date
     if res['currency']=="EUR":

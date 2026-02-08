@@ -4,7 +4,7 @@ import pandas as pd
 
 from .Forms.Equity import Ui_Autocall
 
-path_markit_names=r"C:\Users\jorda\OneDrive\Documents\pricer_interface-main\Markit_names.xlsx"
+path_markit_names=r"C:\Users\jorda\OneDrive\Documents\pricer-interface-main2\Markit_names.xlsx"
 df=pd.read_excel(path_markit_names)
 dic_currency=dict(tuple(df.groupby('Currency')['Underlyings']))
 dic_currency={key:value.to_list() for key,value in dic_currency.items()}
@@ -12,7 +12,9 @@ dic_currency={ key: dic_currency[key] for key in ['EUR','USD']}
 
 class Ui_EquityPage(QWidget):
     """A tabbed widget containing several form tabs."""
-    submitted = Signal(dict)  # re-emit form submissions
+    # re-emit
+    submitted = Signal(dict)
+    copy_input=Signal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -28,38 +30,33 @@ class Ui_EquityPage(QWidget):
         self.Equitytabs = QTabWidget(self)
         self.Equitytabs.setObjectName("EquityTabs")
 
-        # Tab 1 - General
-        self.form_general = Ui_Autocall(dic_currency)
-        self.form_general.setObjectName("tab_autocallEquity")
-        self.Equitytabs.addTab(self.form_general, "Autocall")
-
-        # Tab 2 - Details
-        # self.form_details = Ui_FormPage()
-        # self.form_details.setObjectName("tab_details")
-        # self.form_details.name_edit.setPlaceholderText("Full name (Details)")
-        # self.form_details.email_edit.setPlaceholderText("work.email@company.com")
-        # self.Equitytabs.addTab(self.form_details, "Details")
-
-        # Tab 3 - Financial
-        # self.form_financial = Ui_FormPage()
-        # self.form_financial.setObjectName("tab_financial")
-        # self.form_financial.name_edit.setPlaceholderText("Account holder name")
-        # self.form_financial.desc_edit.setPlaceholderText("Notes about the transaction")
-        # # tweak numeric widget defaults for financial tab
-        # self.form_financial.amount.setDecimals(2)
-        # self.form_financial.amount.setSingleStep(0.01)
-        # self.Equitytabs.addTab(self.form_financial, "Financial")
+        # Tab 1 - Autocall
+        self.form_autocall = Ui_Autocall(dic_currency)
+        self.form_autocall.setObjectName("tab_autocallEquity")
+        self.Equitytabs.addTab(self.form_autocall, "Autocall")
 
         layout.addWidget(self.Equitytabs)
 
     def _connect_signals(self):
         # re-emit submitted signal with source tab info
-        self.form_general.submitted.connect(lambda d: self._on_submitted(d, "Autocall"))
-        # self.form_details.submitted.connect(lambda d: self._on_submitted(d, "Details"))
-        # self.form_financial.submitted.connect(lambda d: self._on_submitted(d, "Financial"))
+        self.form_autocall.submitted.connect(lambda d: self._on_submitted(d, "Autocall"))
+        self.form_autocall.copy_input.connect(lambda d: self._on_copy(d, "Autocall"))
 
-    def _on_submitted(self, data: dict, source_tab: str):
-        # add source metadata and re-emit
-        data = dict(data)
-        data["_source_tab"] = source_tab
-        self.submitted.emit(data)
+    def _retrieve_param(self, input_data: dict, source_tab: str):
+        # add source metadata
+        param = {'param':input_data,
+                "_source_tab":source_tab,
+                "_source_page":"Equity"}
+        return param
+    
+    def _on_copy(self, input_data: dict, source_tab: str):
+        param=self._retrieve_param(input_data,source_tab)
+        self.copy_input.emit(param)
+            
+    def _on_submitted(self, input_data: dict, source_tab: str):
+        param=self._retrieve_param(input_data,source_tab)
+<<<<<<< HEAD
+        self.submitted.emit(param)
+=======
+        self.submitted.emit(param)
+>>>>>>> 787c160fd62c1eab198f09ec6622310a8e91f52d

@@ -15,12 +15,11 @@ QLabel#logo {
 }
 
 /* Sidebar buttons (icon + text, left aligned) */
-QPushButton#btnHome,
-QPushButton#btnSettings,
-QPushButton#btnEquity,
-QPushButton#btnRate,
-QPushButton#btnCMT,
-QPushButton#btnSpreadCMT,
+QPushButton#btn_Home,
+QPushButton#btn_Equity,
+QPushButton#btn_Rate,
+QPushButton#btn_CMT,
+QPushButton#btn_SpreadCMT,
 QPushButton#btnToggle {
     color: #ffffffff;
     background: transparent;
@@ -32,27 +31,24 @@ QPushButton#btnToggle {
 }
 
 /* Sidebar button icon spacing (when text present) */
-QPushButton#btnHome::icon,
-QPushButton#btnSettings::icon,
+QPushButton#btn_Home::icon,
 QPushButton#btnToggle::icon {
     /* Qt doesn't support ::icon sizing in all styles, keep this as a hint */
 }
 
 /* Sidebar hover / checked states */
-QPushButton#btnHome:hover,
-QPushButton#btnSettings:hover,
-QPushButton#btnEquity:hover,
-QPushButton#btnRate:hover,
-QPushButton#btnSpreadCMT:hover,
-QPushButton#btnCMT:hover {
+QPushButton#btn_Home:hover,
+QPushButton#btn_Equity:hover,
+QPushButton#btn_Rate:hover,
+QPushButton#btn_SpreadCMT:hover,
+QPushButton#btn_CMT:hover {
     background: rgba(255,255,255,0.04);
 }
-QPushButton#btnHome:checked,
-QPushButton#btnSettings:checked,
-QPushButton#btnEquity:checked,
-QPushButton#btnRate:checked,
-QPushButton#btnSpreadCMT:checked,
-QPushButton#btnCMT:checked {
+QPushButton#btn_Home:checked,
+QPushButton#btn_Equity:checked,
+QPushButton#btn_Rate:checked,
+QPushButton#btn_SpreadCMT:checked,
+QPushButton#btn_CMT:checked {
     background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 rgba(102,217,239,0.12), stop:1 rgba(102,217,239,0.06));
     color: #ffcfc4;
 }
@@ -161,6 +157,7 @@ QSpinBox#maturity,
 QSpinBox#fixing_offset,
 QComboBox#frequency,
 QComboBox#call_frequency,
+QComboBox#solving_cb,
 QDateEdit#first_call_date,
 QComboBox#fixing_type,
 QSpinBox#NC,
@@ -173,6 +170,8 @@ QDoubleSpinBox#buffer,
 QDoubleSpinBox#UF,
 QDoubleSpinBox#lowerbound_level,
 QDoubleSpinBox#upperbound_level,
+QDoubleSpinBox#cap,
+QDoubleSpinBox#floor,
 QDoubleSpinBox#Target,
 QSpinBox#nb_guaranteedcoupon,
 QDateEdit#initial_strike_date
